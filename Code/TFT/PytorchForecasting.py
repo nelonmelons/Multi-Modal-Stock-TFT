@@ -299,7 +299,15 @@ def tft():
     tft.evaluate(number_of_examples=1)
     plt.show()
 
-
+if __name__ == "__main__":
+    tft()
+    #tft = TFT()
+    #tft.load_data()
+    #tft.create_tft_model()
+    #tft.train()
+    #tft.evaluate(number_of_examples=1)
+    #plt.show()
+    #torch.save(tft, "Model.pickle")
 
 
 
