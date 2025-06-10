@@ -82,7 +82,7 @@ class PoissonLoss(nn.Module):
        float loss    : Output float with loss value
 
     """
-    def __init__():
+    def __init__(self, neuron=False, avg=True, bias=1e-8):
         self.neuron = neuron
         self.avg = avg
         self.bias = bias
