@@ -23,7 +23,6 @@ pandas-ta>=0.3.14b0
 # TFT and forecasting
 pytorch-forecasting>=0.10.0
 lightning>=2.0.0
-pytorch-lightning>=2.0.0
 
 # Utilities
 scikit-learn>=1.1.0
@@ -36,3 +35,5 @@ pytest>=7.0.0
 black>=22.0.0
 flake8>=4.0.0
 jupyter>=1.0.0
+
+fredapi>=0.4.0

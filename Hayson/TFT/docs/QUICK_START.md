@@ -3,11 +3,13 @@
 ## ⚡ 5-Minute Setup
 
 ### 1. Install Dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
 ### 2. Configure API Keys (Optional but Recommended)
+
 ```bash
 # Copy environment template
 cp .env.example .env
@@ -19,6 +21,7 @@ API_NINJAS_KEY=your_ninjas_key         # Get free at: https://api.api-ninjas.com
 ```
 
 ### 3. Basic Usage
+
 ```python
 from data import get_data_loader_with_module
 
@@ -37,6 +40,7 @@ module.print_tensor_report()  # See detailed feature breakdown
 ```
 
 ### 4. Train TFT Model
+
 ```python
 from pytorch_forecasting import TemporalFusionTransformer
 import pytorch_lightning as pl
@@ -59,6 +63,7 @@ print("🎉 Model training complete!")
 ## 📊 What You Get
 
 ### Data Sources (6)
+
 - **📈 Stock Data**: OHLCV + bid/ask from yfinance
 - **📅 Corporate Events**: Earnings, splits, dividends
 - **📰 News Intelligence**: BERT embeddings + sentiment
@@ -67,6 +72,7 @@ print("🎉 Model training complete!")
 - **🏢 Company Data**: Sector, market cap
 
 ### Features (860)
+
 - **Static Features**: 3 (symbol, sector, market_cap)
 - **Known Future**: 28 (calendar, economic, events)
 - **Past Observed**: 829 (OHLCV, technical, news, etc.)
@@ -75,18 +81,19 @@ print("🎉 Model training complete!")
 
 ```bash
 # Quick validation
-python main.py --validate
+python example.py --validate
 
 # Full example with tensor report
-python main.py
+python example.py
 
 # Integration tests
-python main.py --test
+python example.py --test
 ```
 
 ## 💡 Tips for Success
 
 ### For Small Datasets
+
 ```python
 # Use smaller parameters for limited data
 loader, module = get_data_loader_with_module(
@@ -100,6 +107,7 @@ loader, module = get_data_loader_with_module(
 ```
 
 ### For Production
+
 ```python
 # Use all API keys for full feature set
 loader, module = get_data_loader_with_module(
@@ -118,18 +126,21 @@ loader, module = get_data_loader_with_module(
 ## 🔧 Common Issues & Quick Fixes
 
 ### Issue: "Insufficient data"
+
 ```python
 # Solution: Use smaller encoder/prediction lengths
 encoder_len=10, predict_len=2
 ```
 
 ### Issue: No news data
+
 ```python
 # Expected for historical dates (NewsAPI limit)
 # Recent dates will have news embeddings
 ```
 
 ### Issue: Missing API keys
+
 ```python
 # System works without keys but with reduced features
 # Add keys for full 860-feature experience
