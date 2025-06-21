@@ -1,8 +1,8 @@
 import os
 import torch
-from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from pytorch_forecasting import TemporalFusionTransformer
+from lightning.pytorch import Trainer  # ✅ instead of `from pytorch_lightning`s
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_forecasting.models import TemporalFusionTransformer
 from pytorch_forecasting.metrics import MAE
 from dataModule import get_data_loader_with_module
 
@@ -21,7 +21,7 @@ fred_api_key=os.getenv('FRED_API_KEY')
 api_ninjas_key=os.getenv('API_NINJAS_KEY')
 
 print(f"NEWS_API_KEY: {news_api_key}"
-      f"\nFRED_API_KEY: {fred_api_key}"
+      f"\nFRED_API_KEY: {fred_api_key}a"
         f"\nAPI_NINJAS_KEY: {api_ninjas_key}")
 print(f"Symbols: {symbols}")
 
@@ -47,7 +47,7 @@ model = TemporalFusionTransformer.from_dataset(
     dropout=0.1,
     hidden_continuous_size=8,
     output_size=7,  # 7 quantiles by default
-    loss=torch.nn.MSELoss(),
+    loss=MAE(),
     log_interval=10,
     reduce_on_plateau_patience=4,
 )
