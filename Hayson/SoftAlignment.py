@@ -1,5 +1,5 @@
 from basics import *
-
+#instead of using Transformer, we use this ?? it has attention mechanism 
 
 class SoftAlignModel(nn.Module):
     """
