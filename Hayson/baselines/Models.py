@@ -51,7 +51,7 @@ class FullModel(nn.Module):
 def train_full_model(
     model_type: str,
     data_dir: str,
-    batch_size: int = 64,
+    batch_size: int = 32,
     lr: float = 1e-3,
     epochs: int = 50,
     device: str = None,
@@ -118,7 +118,7 @@ def train_full_model(
         if avg_val < best_val_loss:
             best_val_loss = avg_val
             torch.save(model.state_dict(), save_path)
-            print(f"  ↪️  New best model saved (val loss {best_val_loss:.4f})")
+            print(f"  ↪️  8New best model saved (val loss {best_val_loss:.4f})")
 
     print("Training complete.")
     return model
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     model = train_full_model(
         model_type="encdec",
         data_dir="Hayson/data",
-        batch_size=128,
+        batch_size=32,
         lr=1e-3,
         epochs=30,
         save_path="best_encdec.pt",

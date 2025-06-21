@@ -1,0 +1,36 @@
+# Minimal requirements for basic functionality
+# This file contains only the essential dependencies
+
+# Core data processing
+pandas>=1.5.0
+numpy>=1.20.0
+
+# Stock data
+yfinance>=0.2.0
+
+# Basic technical indicators using pandas
+pandas-ta>=0.3.14b0
+
+# TFT and forecasting - core only
+torch>=1.12.0
+pytorch-forecasting>=0.10.0
+lightning>=2.0.0
+
+# Utilities
+scikit-learn>=1.1.0
+
+# Environment variables
+python-dotenv>=0.19.0
+
+# Optional: Events data (requires API key)
+# finnhub-python>=2.4.0
+
+# Optional: News embeddings (requires API key and more dependencies)
+# requests>=2.28.0
+# transformers>=4.20.0
+# sentencepiece>=0.1.97
+
+# Optional: Visualization
+# matplotlib>=3.5.0
+# seaborn>=0.11.0
+# plotly>=5.10.0
