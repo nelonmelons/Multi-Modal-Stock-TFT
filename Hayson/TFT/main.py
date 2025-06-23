@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from data import get_data_loader_with_module
+from dataModule import get_data_loader_with_module
 
 
 def print_tensor_shapes(batch):
