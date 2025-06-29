@@ -69,7 +69,7 @@ def run_trading_simulation():
         return
     
     # Generate mock predictions (for demonstration)
-    print(f"\n🔮 Generating mock predictions...")
+    print(f"\n🔮 Generating moc2k predictions...")
     np.random.seed(42)
     n_predictions = min(100, len(price_data) // 2)
     
@@ -269,7 +269,7 @@ def create_strategy_summary(portfolio_values, trades, initial_capital):
     buy_trades = len([t for t in trades if t[0] == 'BUY'])
     sell_trades = len([t for t in trades if t[0] == 'SELL'])
     
-    report = f\"\"\"
+    report = f"""
 ===============================================
 🎯 TFT TRADING STRATEGY PERFORMANCE REPORT
 ===============================================
@@ -311,7 +311,7 @@ def create_strategy_summary(portfolio_values, trades, initial_capital):
    • The data pipeline supports real-time prediction deployment
 
 ===============================================
-\"\"\"
+"""
     
     print(report)
     
