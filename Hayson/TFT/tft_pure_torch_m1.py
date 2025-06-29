@@ -2,7 +2,7 @@
 """
 TFT Model Training with Pure PyTorch for M1 Mac
 
-Complete rewrite using pure PyTorch to avoid Lightning/MPS compatibility issues.
+This file now only contains model and helper definitions. Run the unified pipeline via main.py.
 """
 
 import os
@@ -10,15 +10,11 @@ import sys
 import torch
 import torch.nn as nn
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
-from datetime import datetime
 from tqdm import tqdm
 import warnings
 warnings.filterwarnings('ignore')
 
-# Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from dataModule.interface import get_data_loader_with_module
@@ -1070,79 +1066,55 @@ Model: SimpleTFT
 
 
 def simulate_trading(predictions, actuals):
-    """Simulate trading strategy based on predictions."""
-    
+    import numpy as np
+    import matplotlib.pyplot as plt
     print("💰 Running trading simulation...")
-    
-    # Generate price-like data from returns
     initial_price = 100.0
     actual_prices = [initial_price]
     pred_prices = [initial_price]
-    
     for i in range(len(actuals)):
         actual_prices.append(actual_prices[-1] * (1 + actuals[i] * 0.01))
         pred_prices.append(pred_prices[-1] * (1 + predictions[i] * 0.01))
-    
     actual_prices = np.array(actual_prices[1:])
     pred_prices = np.array(pred_prices[1:])
-    
-    # Trading simulation
-    portfolio_value = 10000  # Starting capital
-    position = 0  # 0 = no position, 1 = long, -1 = short
+    portfolio_value = 10000
+    position = 0
     trades = []
     portfolio_values = [portfolio_value]
-    
     for i in range(1, len(pred_prices)):
-        # Trading signal based on predicted direction
         if i < len(pred_prices) - 1:
             predicted_return = (pred_prices[i+1] - pred_prices[i]) / pred_prices[i]
             actual_return = (actual_prices[i+1] - actual_prices[i]) / actual_prices[i]
-            
-            # Simple strategy: long if predicted positive return, short if negative
-            if predicted_return > 0.001 and position != 1:  # Buy signal
-                if position == -1:  # Close short position
+            if predicted_return > 0.001 and position != 1:
+                if position == -1:
                     trades.append(('close_short', i, actual_prices[i]))
                 trades.append(('buy', i, actual_prices[i]))
                 position = 1
-            elif predicted_return < -0.001 and position != -1:  # Sell signal
-                if position == 1:  # Close long position
+            elif predicted_return < -0.001 and position != -1:
+                if position == 1:
                     trades.append(('close_long', i, actual_prices[i]))
                 trades.append(('sell_short', i, actual_prices[i]))
                 position = -1
-            
-            # Update portfolio value
-            if position == 1:  # Long position
+            if position == 1:
                 portfolio_value *= (1 + actual_return)
-            elif position == -1:  # Short position
+            elif position == -1:
                 portfolio_value *= (1 - actual_return)
-            
             portfolio_values.append(portfolio_value)
-    
-    # Calculate performance metrics
     total_return = (portfolio_value - 10000) / 10000 * 100
     buy_hold_return = (actual_prices[-1] - actual_prices[0]) / actual_prices[0] * 100
-    
-    # Create trading visualization
     plt.figure(figsize=(15, 10))
-    
-    # Price chart with trades
     plt.subplot(2, 2, 1)
     plt.plot(actual_prices, label='Actual Price', color='blue', alpha=0.8)
     plt.plot(pred_prices, label='Predicted Price', color='red', alpha=0.8, linestyle='--')
-    
-    # Mark trades
     for trade_type, idx, price in trades:
         color = 'green' if 'buy' in trade_type else 'red'
         marker = '^' if 'buy' in trade_type else 'v'
         plt.scatter(idx, price, color=color, marker=marker, s=100, alpha=0.8)
-    
     plt.title('Trading Strategy Performance', fontsize=14, fontweight='bold')
     plt.xlabel('Time')
     plt.ylabel('Price')
     plt.legend()
     plt.grid(True, alpha=0.3)
-    
-    # Portfolio value
     plt.subplot(2, 2, 2)
     plt.plot(portfolio_values, color='green', linewidth=2)
     plt.axhline(y=10000, color='gray', linestyle='--', alpha=0.8)
@@ -1150,22 +1122,16 @@ def simulate_trading(predictions, actuals):
     plt.xlabel('Time')
     plt.ylabel('Portfolio Value ($)')
     plt.grid(True, alpha=0.3)
-    
-    # Returns comparison
     plt.subplot(2, 2, 3)
     strategies = ['TFT Strategy', 'Buy & Hold']
     returns = [total_return, buy_hold_return]
     colors = ['green' if r > 0 else 'red' for r in returns]
-    
     plt.bar(strategies, returns, color=colors, alpha=0.7)
     plt.title('Strategy Returns Comparison', fontsize=14, fontweight='bold')
     plt.ylabel('Return (%)')
     plt.grid(True, alpha=0.3)
-    
-    # Performance summary
     plt.subplot(2, 2, 4)
     plt.axis('off')
-    
     summary_text = f'''
 Trading Performance Summary:
 
@@ -1176,111 +1142,15 @@ Buy & Hold Return: {buy_hold_return:.2f}%
 Outperformance: {total_return - buy_hold_return:.2f}%
 
 Number of Trades: {len(trades)}
-Win Rate: {np.mean([1 if t > 0 else 0 for t in np.diff(portfolio_values)]) * 100:.1f}%
+Win Rate: {np.mean([1 if t > 0 else 0 for t in np.diff(portfolio_values)]) * 100 if len(portfolio_values) > 1 else float('nan'):.1f}%
 
 Strategy: Trend Following
 Signal: Predicted Price Direction
     '''
-    
-    plt.text(0.1, 0.5, summary_text, fontsize=12, verticalalignment='center',
-             bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8))
-    
+    plt.text(0.1, 0.5, summary_text, fontsize=12, verticalalignment='center', bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8))
     plt.tight_layout()
-    
-    # Save trading plot
     trading_output = 'tft_trading_performance.png'
     plt.savefig(trading_output, dpi=300, bbox_inches='tight')
     plt.close()
-    
     print(f"   ✅ Saved trading analysis to {trading_output}")
     print(f"   💰 Total return: {total_return:.2f}% vs Buy & Hold: {buy_hold_return:.2f}%")
-
-
-def main():
-    """Main execution function."""
-    
-    print("🚀 TFT MODEL TRAINING WITH PURE PYTORCH")
-    print("=" * 60)
-    
-    # Setup device
-    device = setup_device()
-    
-    # Load data
-    print("\n📊 Loading data...")
-    try:
-        dataloader, datamodule = get_data_loader_with_module(
-            symbols=['AAPL'],
-            start='2020-01-01',
-            end='2023-12-31',
-            encoder_len=30,
-            predict_len=1,
-            batch_size=32
-        )
-        print("✅ Data loaded successfully")
-        
-        # Display data info if available
-        try:
-            if hasattr(datamodule, 'feature_df'):
-                print(f"   Features shape: {datamodule.feature_df.shape}")
-                print(f"   Feature columns: {len(datamodule.feature_df.columns)}")
-        except:
-            print("   Data info not available")
-        
-    except Exception as e:
-        print(f"❌ Error loading data: {e}")
-        return
-    
-    # Prepare data for training
-    train_data, val_data = prepare_data_for_training(datamodule, device)
-    
-    if not train_data:
-        print("❌ No training data available")
-        return
-    
-    # Determine input size from first batch
-    sample_x, sample_y = train_data[0]
-    input_size = sample_x.shape[-1]
-    print(f"   Input size: {input_size}")
-    
-    # Create model
-    print(f"\n🧠 Creating SimpleTFT model...")
-    model = SimpleTFT(
-        input_size=input_size,
-        hidden_size=64,
-        num_heads=4,
-        dropout=0.1,
-        seq_len=30,
-        prediction_len=1
-    )
-    
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"   ✅ Model created with {total_params:,} parameters")
-    
-    # Train model
-    train_losses, val_losses = train_model(
-        model, train_data, val_data, device, 
-        epochs=15, lr=0.001
-    )
-    
-    # Generate predictions
-    predictions, actuals = generate_predictions(model, val_data, device)
-    
-    # Create visualizations
-    create_visualizations(predictions, actuals, train_losses, val_losses)
-    
-    # Run trading simulation only if we have predictions
-    if len(predictions) > 0 and len(actuals) > 0:
-        simulate_trading(predictions, actuals)
-    else:
-        print("⚠️ Skipping trading simulation - no predictions available")
-    
-    print("\n✅ ANALYSIS COMPLETE!")
-    print("📁 Generated files:")
-    print("   - tft_pure_torch_analysis.png")
-    print("   - tft_trading_performance.png")
-    print(f"🔧 Device used: {device}")
-    print(f"📊 Predictions generated: {len(predictions)}")
-
-
-if __name__ == "__main__":
-    main()
