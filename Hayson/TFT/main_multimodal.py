@@ -27,7 +27,7 @@ except Exception as e:
 
 print("About to import tft_pure_torch_m1...")
 try:
-    from tft_pure_torch_m1 import TFT, setup_device, prepare_data_for_training, train_model, generate_predictions, create_visualizations, simulate_trading
+    from tft_multimodal import TFT, setup_device, prepare_data_for_training, train_model, generate_predictions, create_visualizations, simulate_trading
     print("tft_pure_torch_m1 imported successfully")
 except Exception as e:
     print(f"Error importing tft_pure_torch_m1: {e}")
