@@ -3,15 +3,31 @@
 Unified TFT Pipeline: Run this script to execute the full, robust, and interpretable TFT pipeline (data loading, training, prediction, interpretability, trading simulation, and plotting).
 """
 
+print("Starting script...")
+
 import os
 import sys
 from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings('ignore')
 
+print("Basic imports done...")
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from dataModule.interface import get_data_loader_with_module
-from tft_pure_torch_m1 import SimpleTFT, setup_device, prepare_data_for_training, train_model, generate_predictions, create_visualizations, simulate_trading
+
+print("About to import dataModule...")
+try:
+    from dataModule.interface import get_data_loader_with_module
+    print("dataModule imported successfully")
+except Exception as e:
+    print(f"Error importing dataModule: {e}")
+
+print("About to import tft_pure_torch_m1...")
+try:
+    from tft_pure_torch_m1 import SimpleTFT, setup_device, prepare_data_for_training, train_model, generate_predictions, create_visualizations, simulate_trading
+    print("tft_pure_torch_m1 imported successfully")
+except Exception as e:
+    print(f"Error importing tft_pure_torch_m1: {e}")
 
 
 def main():
@@ -54,5 +70,5 @@ def main():
         print("⚠️ Skipping trading simulation - no predictions available")
     print("\n✅ Pipeline complete. See tft_pure_torch_analysis.png and tft_trading_performance.png for results.")
 
-if __name__ == "__main__":
-    main()
+print("hayson is gay")
+main()
