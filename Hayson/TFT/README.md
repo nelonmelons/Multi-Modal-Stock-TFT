@@ -22,8 +22,9 @@
 <td width="50%">
 
 ### 🎯 **Data Leakage-Free Architecture**
+
 - ✅ **Sequential Walk-Forward Prediction**: Mimics real-world trading
-- ✅ **No Future Peeking**: Only uses past information 
+- ✅ **No Future Peeking**: Only uses past information
 - ✅ **Honest Performance Metrics**: Realistic evaluation
 - ✅ **Production-Ready**: Ready for real trading applications
 
@@ -31,6 +32,7 @@
 <td width="50%">
 
 ### 🏗️ **Advanced TFT Implementation**
+
 - 🧠 **Variable Selection Networks**: Intelligent feature selection
 - 🔄 **Gated Residual Networks**: Advanced information processing
 - 👁️ **Multi-Head Attention**: Interpretable temporal relationships
@@ -42,6 +44,7 @@
 <td width="50%">
 
 ### 📊 **Rich Financial Features**
+
 - 💹 **Price Data**: OHLCV (Open, High, Low, Close, Volume)
 - 📈 **Technical Indicators**: SMA, RSI with proper normalization
 - 📅 **Calendar Features**: Day of week, month, time indexing
@@ -51,6 +54,7 @@
 <td width="50%">
 
 ### ⚡ **Easy to Use**
+
 - 🚀 **One-Line Training**: Simple API for quick experiments
 - 🔧 **Centralized Config**: Easy symbol and parameter changes
 - 📋 **Comprehensive Logging**: Detailed training and validation metrics
@@ -107,7 +111,7 @@ model, train_losses, val_losses = train_baseline_tft(
 DEFAULT_SYMBOLS = ['AAPL']                    # Single stock
 # or
 DEFAULT_SYMBOLS = ['AAPL', 'MSFT', 'GOOGL']  # Multiple stocks
-# or  
+# or
 DEFAULT_SYMBOLS = ['SPY']                     # ETF for market-wide prediction
 ```
 
@@ -141,7 +145,7 @@ Epoch  30: Train Loss: 0.1127, Val Loss: 0.1358
 ```
 📦 TFT/
 ├── 📄 README.md                          # This comprehensive guide
-├── 🐍 train_baseline_tft.py             # 🚀 Main training script  
+├── 🐍 train_baseline_tft.py             # 🚀 Main training script
 ├── 🧠 baseline_tft.py                   # 🏗️ TFT model implementation
 ├── 📋 requirements.txt                  # 📦 Python dependencies
 ├── 📊 REFACTORING_SUMMARY.md           # 📝 Documentation of changes made
@@ -161,27 +165,29 @@ Epoch  30: Train Loss: 0.1127, Val Loss: 0.1358
 
 ### 🎯 Key Files
 
-| File | Purpose | Key Functions |
-|------|---------|---------------|
+| File                    | Purpose                       | Key Functions                                                                    |
+| ----------------------- | ----------------------------- | -------------------------------------------------------------------------------- |
 | `train_baseline_tft.py` | 🚀 **Main Training Pipeline** | `train_baseline_tft()`, `sequential_prediction()`, `analyze_model_performance()` |
-| `baseline_tft.py` | 🧠 **TFT Architecture** | `BaselineTFT`, `create_baseline_data()`, Neural network components |
-| `requirements.txt` | 📦 **Dependencies** | All required Python packages with versions |
+| `baseline_tft.py`       | 🧠 **TFT Architecture**       | `BaselineTFT`, `create_baseline_data()`, Neural network components               |
+| `requirements.txt`      | 📦 **Dependencies**           | All required Python packages with versions                                       |
 
 ## 🔧 Core Components
 
 ### 1. **Model Architecture** (`baseline_tft.py`)
 
 #### **BaselineTFT Class**
+
 - Complete TFT implementation following the original paper
 - Configurable architecture with proper feature dimensions
 - Support for static and time-varying features
 
 #### **Key Neural Network Components**
+
 ```python
 # Gated Residual Networks
 class GatedResidualNetwork(nn.Module)
 
-# Variable Selection Networks  
+# Variable Selection Networks
 class VariableSelectionNetwork(nn.Module)
 
 # Interpretable Multi-Head Attention
@@ -192,6 +198,7 @@ class QuantileLoss(nn.Module)
 ```
 
 #### **Data Pipeline**
+
 ```python
 # Create training dataset
 def create_baseline_data(symbols, start_date, end_date)
@@ -206,6 +213,7 @@ def create_sequences(df, encoder_length, prediction_length)
 ### 2. **Training Pipeline** (`train_baseline_tft.py`)
 
 #### **Sequential Prediction Functions**
+
 ```python
 # Walk-forward prediction (no data leakage)
 def sequential_prediction(model, initial_data, num_steps, device)
@@ -218,6 +226,7 @@ def update_sequence_with_prediction(encoder_cont, decoder_cont, predicted_return
 ```
 
 #### **Analysis and Visualization**
+
 ```python
 # Performance analysis with sequential predictions only
 def analyze_model_performance(model, val_loader, device)
@@ -238,9 +247,10 @@ def create_training_plot(train_losses, val_losses)
 <td width="50%">
 
 **❌ Traditional Batch Prediction (Data Leakage)**
+
 ```
 ⚠️  All validation sequences processed simultaneously
-⚠️  Model can "peek" at future information  
+⚠️  Model can "peek" at future information
 ⚠️  Artificially good performance metrics
 ⚠️  Doesn't reflect real trading conditions
 ⚠️  REMOVED from this implementation
@@ -250,9 +260,10 @@ def create_training_plot(train_losses, val_losses)
 <td width="50%">
 
 **✅ Sequential Walk-Forward Prediction (No Leakage)**
+
 ```
 ✅ Day 1: Use Days 1-30 (actual) → Predict Day 31
-✅ Day 2: Use Days 2-30 (actual) + Day 31 (predicted) → Predict Day 32  
+✅ Day 2: Use Days 2-30 (actual) + Day 31 (predicted) → Predict Day 32
 ✅ Day 3: Use Days 3-30 (actual) + Days 31-32 (predicted) → Predict Day 33
 ✅ Mimics real trading conditions exactly
 ```
@@ -267,13 +278,13 @@ def create_training_plot(train_losses, val_losses)
 def sequential_prediction(model, initial_data, num_steps, device):
     """
     🎯 Perform true sequential prediction without future peeking.
-    
+
     Each prediction step:
     1. 📊 Use current 30-day window to predict next return
     2. ⏭️ Update window by rolling forward one day
     3. 🔄 Incorporate prediction into next window
     4. 🔁 Repeat for specified number of steps
-    
+
     Returns:
         predictions (List[float]): Sequential predictions
         attention_history (List): Attention patterns over time
@@ -283,13 +294,14 @@ def sequential_prediction(model, initial_data, num_steps, device):
         batch = create_sequential_batch(encoder_cont, decoder_cont, static_cat, static_real)
         output = model(batch)
         prediction = output['prediction'][0, 0, 2].item()  # Median quantile
-        
+
         # 🔄 Update sequence for next prediction
         encoder_cont, decoder_cont = update_sequence_with_prediction(
             encoder_cont, decoder_cont, prediction, step
         )
 ```
-```
+
+````
 
 ## 🎯 Training Process
 
@@ -306,9 +318,10 @@ df['rsi_14'] = calculate_rsi(df['close'], 14)
 
 # Normalize features
 df = normalize_features(df)
-```
+````
 
 ### **2. Model Training**
+
 ```python
 # Training loop with proper validation
 for epoch in range(epochs):
@@ -320,7 +333,7 @@ for epoch in range(epochs):
         loss = criterion(outputs['prediction'], batch['target'])
         loss.backward()
         optimizer.step()
-    
+
     # Validation phase (no data leakage)
     model.eval()
     with torch.no_grad():
@@ -329,6 +342,7 @@ for epoch in range(epochs):
 ```
 
 ### **📊 Performance Analysis**
+
 ```python
 # 🎯 Sequential prediction for realistic evaluation
 initial_data, true_returns = get_sequential_validation_data(val_loader, device)
@@ -341,38 +355,42 @@ directional_accuracy = np.mean(np.sign(predictions[1:]) == np.sign(targets[1:]))
 
 print(f"📊 Sequential Performance:")
 print(f"   MAE: {mae:.4f}")
-print(f"   RMSE: {rmse:.4f}")  
+print(f"   RMSE: {rmse:.4f}")
 print(f"   Directional Accuracy: {directional_accuracy:.1f}%")
 ```
 
 ## 📊 Performance Metrics
 
 ### **📈 Returns-Based Metrics**
-| Metric | Description | Typical Range | Good Performance |
-|--------|-------------|---------------|------------------|
-| **MAE** | Mean Absolute Error | 0.01 - 0.05 | < 0.025 |
-| **RMSE** | Root Mean Square Error | 0.015 - 0.06 | < 0.035 |
-| **R²** | Proportion of variance explained | -0.1 - 0.6 | > 0.3 |
-| **Correlation** | Linear relationship strength | 0.0 - 0.8 | > 0.5 |
-| **Directional Accuracy** | % correct direction predictions | 45% - 65% | > 55% |
 
-### **💰 Price-Based Metrics** 
-| Metric | Description | Purpose |
-|--------|-------------|---------|
-| **Price MAE/RMSE** | Absolute dollar prediction errors | Real-world impact assessment |
-| **MAPE** | Mean Absolute Percentage Error | Relative error percentage |
-| **Price Reconstruction** | Converting return → price predictions | Trading strategy evaluation |
+| Metric                   | Description                      | Typical Range | Good Performance |
+| ------------------------ | -------------------------------- | ------------- | ---------------- |
+| **MAE**                  | Mean Absolute Error              | 0.01 - 0.05   | < 0.025          |
+| **RMSE**                 | Root Mean Square Error           | 0.015 - 0.06  | < 0.035          |
+| **R²**                   | Proportion of variance explained | -0.1 - 0.6    | > 0.3            |
+| **Correlation**          | Linear relationship strength     | 0.0 - 0.8     | > 0.5            |
+| **Directional Accuracy** | % correct direction predictions  | 45% - 65%     | > 55%            |
+
+### **💰 Price-Based Metrics**
+
+| Metric                   | Description                           | Purpose                      |
+| ------------------------ | ------------------------------------- | ---------------------------- |
+| **Price MAE/RMSE**       | Absolute dollar prediction errors     | Real-world impact assessment |
+| **MAPE**                 | Mean Absolute Percentage Error        | Relative error percentage    |
+| **Price Reconstruction** | Converting return → price predictions | Trading strategy evaluation  |
 
 ### **💼 Trading Simulation Metrics**
-| Metric | Description | Interpretation |
-|--------|-------------|----------------|
-| **Strategy Return** | TFT-based trading performance | Total return from predictions |
-| **Buy & Hold Return** | Baseline passive investment | Market benchmark |
-| **Excess Return** | Strategy vs buy & hold | Value of active prediction |
-| **Number of Trades** | Trading frequency | Transaction cost consideration |
-| **Sharpe Ratio** | Risk-adjusted returns | Quality of risk/return profile |
+
+| Metric                | Description                   | Interpretation                 |
+| --------------------- | ----------------------------- | ------------------------------ |
+| **Strategy Return**   | TFT-based trading performance | Total return from predictions  |
+| **Buy & Hold Return** | Baseline passive investment   | Market benchmark               |
+| **Excess Return**     | Strategy vs buy & hold        | Value of active prediction     |
+| **Number of Trades**  | Trading frequency             | Transaction cost consideration |
+| **Sharpe Ratio**      | Risk-adjusted returns         | Quality of risk/return profile |
 
 ### **📊 Example Performance Output**
+
 ```bash
 📈 Sequential Prediction Performance Summary:
    MAE: 0.0245          # ✅ Good (< 0.025)
@@ -392,6 +410,7 @@ print(f"   Directional Accuracy: {directional_accuracy:.1f}%")
 ## 🔍 Model Interpretability
 
 ### **Attention Weights**
+
 ```python
 # Extract attention patterns
 attention_weights = output['attention_weights']  # [batch, decoder_len, encoder_len]
@@ -403,15 +422,17 @@ plt.ylabel('Decoder Time Steps')
 ```
 
 ### **Variable Selection**
+
 ```python
 # Historical variable importance
 historical_weights = output['historical_weights']  # [batch, seq_len, num_features]
 
-# Future variable importance  
+# Future variable importance
 future_weights = output['future_weights']  # [batch, pred_len, num_features]
 ```
 
 ### **Quantile Predictions**
+
 ```python
 # Uncertainty estimation
 quantiles = [0.1, 0.25, 0.5, 0.75, 0.9]
@@ -426,6 +447,7 @@ upper_bound = predictions[:, :, 4]  # 90th percentile
 ## ⚙️ Configuration Options
 
 ### **Model Architecture**
+
 ```python
 model = BaselineTFT(
     static_categorical_cardinalities=[len(symbols)],  # Number of symbols
@@ -442,6 +464,7 @@ model = BaselineTFT(
 ```
 
 ### **Training Configuration**
+
 ```python
 config = {
     'symbols': ['NFLX'],                    # Stock symbols
@@ -459,6 +482,7 @@ config = {
 ## 📋 Example Output
 
 ### **Training Progress**
+
 ```
 🚀 Starting TFT Training with Simple Baseline
 ============================================================
@@ -480,6 +504,7 @@ Best validation loss: 0.1358
 ```
 
 ### **Performance Analysis**
+
 ```
 📈 Sequential Prediction Performance Summary:
    MAE: 0.0245
@@ -498,6 +523,7 @@ Best validation loss: 0.1358
 ## 🔧 Advanced Usage
 
 ### **🎯 Custom Stock Symbols**
+
 ```python
 # 📈 Single high-volatility stock
 train_baseline_tft(symbols=['TSLA'])
@@ -513,6 +539,7 @@ train_baseline_tft(symbols=['SPY', 'VTI', 'VXUS', 'BND'])
 ```
 
 ### **⏰ Extended Training Periods**
+
 ```python
 # 📈 Long-term training (8+ years)
 train_baseline_tft(
@@ -533,6 +560,7 @@ train_baseline_tft(
 ```
 
 ### **🏗️ Model Architecture Scaling**
+
 ```python
 # 🧠 Larger model for better performance
 train_baseline_tft(
@@ -554,12 +582,13 @@ train_baseline_tft(
 ```
 
 ### **🎛️ Advanced Configuration**
+
 ```python
 # 🔧 Production-ready configuration
 config = {
     'symbols': ['SPY', 'QQQ'],              # 📊 Market ETFs
     'start_date': '2018-01-01',             # 📅 5+ years
-    'end_date': '2023-12-31',               
+    'end_date': '2023-12-31',
     'epochs': 75,                           # 🏋️ Thorough training
     'batch_size': 48,                       # 📦 Optimized batch size
     'learning_rate': 8e-4,                  # 🎯 Fine-tuned LR
@@ -579,12 +608,12 @@ model, train_losses, val_losses = train_baseline_tft(**config)
 
 </div>
 
-| ✅ **What We Do** | ❌ **What We Avoid** |
-|-------------------|----------------------|
-| Sequential validation ensures no future peeking | Batch prediction with future information |
-| Walk-forward prediction mimics real trading | Processing all validation data simultaneously |
-| Honest performance metrics reflect realistic expectations | Artificially inflated metrics from data leakage |
-| Production-ready for real trading applications | Academic-only implementations with unrealistic performance |
+| ✅ **What We Do**                                         | ❌ **What We Avoid**                                       |
+| --------------------------------------------------------- | ---------------------------------------------------------- |
+| Sequential validation ensures no future peeking           | Batch prediction with future information                   |
+| Walk-forward prediction mimics real trading               | Processing all validation data simultaneously              |
+| Honest performance metrics reflect realistic expectations | Artificially inflated metrics from data leakage            |
+| Production-ready for real trading applications            | Academic-only implementations with unrealistic performance |
 
 ### 📊 **Performance Interpretation Guidelines**
 
@@ -593,6 +622,7 @@ model, train_losses, val_losses = train_baseline_tft(**config)
 <td width="33%">
 
 **🎯 Realistic Expectations**
+
 - Directional accuracy: 50-60%
 - Returns correlation: 0.3-0.7
 - Strategy may underperform buy & hold
@@ -602,6 +632,7 @@ model, train_losses, val_losses = train_baseline_tft(**config)
 <td width="33%">
 
 **📈 Key Metrics Priority**
+
 1. **Directional Accuracy** (most important for trading)
 2. **Correlation** (relationship strength)
 3. **Sharpe Ratio** (risk-adjusted returns)
@@ -611,6 +642,7 @@ model, train_losses, val_losses = train_baseline_tft(**config)
 <td width="33%">
 
 **⚠️ Real-World Considerations**
+
 - Transaction costs reduce returns
 - Market impact affects large trades
 - Model performance varies by market regime
@@ -622,13 +654,13 @@ model, train_losses, val_losses = train_baseline_tft(**config)
 
 ### ⚙️ **System Limitations**
 
-| Limitation | Impact | Potential Enhancement |
-|------------|--------|----------------------|
-| **Single-step prediction** | Only 1 day ahead | Multi-step prediction horizons |
-| **Simple technical indicators** | Limited feature set | Advanced technical analysis |
-| **No fundamental analysis** | Missing valuation metrics | P/E ratios, earnings, news sentiment |
-| **Daily frequency only** | Limited to daily predictions | Intraday or weekly predictions |
-| **No market regime detection** | Same model for all conditions | Adaptive models for different market states |
+| Limitation                      | Impact                        | Potential Enhancement                       |
+| ------------------------------- | ----------------------------- | ------------------------------------------- |
+| **Single-step prediction**      | Only 1 day ahead              | Multi-step prediction horizons              |
+| **Simple technical indicators** | Limited feature set           | Advanced technical analysis                 |
+| **No fundamental analysis**     | Missing valuation metrics     | P/E ratios, earnings, news sentiment        |
+| **Daily frequency only**        | Limited to daily predictions  | Intraday or weekly predictions              |
+| **No market regime detection**  | Same model for all conditions | Adaptive models for different market states |
 
 ## 🛠️ Troubleshooting
 
@@ -641,18 +673,24 @@ model, train_losses, val_losses = train_baseline_tft(**config)
 #### **📊 Data Issues**
 
 **Insufficient Data**
+
 ```bash
 ⚠️  Warning: NFLX has insufficient data (25 < 31)
 ```
-**🔧 Solution:** 
+
+**🔧 Solution:**
+
 - Use longer date range: `start_date='2019-01-01'`
 - Or shorter encoder: `encoder_length=20`
 
 **Missing Stock Data**
+
 ```bash
 ❌ Error: No data found for symbol XYZ
 ```
+
 **🔧 Solution:**
+
 - Check symbol spelling and exchange
 - Use established stocks (AAPL, MSFT, SPY)
 - Verify date range has trading days
@@ -663,19 +701,25 @@ model, train_losses, val_losses = train_baseline_tft(**config)
 #### **💻 System Issues**
 
 **Memory Issues**
+
 ```bash
 RuntimeError: CUDA out of memory
 ```
+
 **🔧 Solution:**
+
 - Reduce `batch_size=16` or `hidden_size=32`
-- Use `device='cpu'` 
+- Use `device='cpu'`
 - Close other GPU applications
 
 **Import Errors**
+
 ```bash
 ModuleNotFoundError: No module named 'yfinance'
 ```
+
 **🔧 Solution:**
+
 - Install: `pip install -r requirements.txt`
 - Check virtual environment activation
 
@@ -685,12 +729,12 @@ ModuleNotFoundError: No module named 'yfinance'
 
 ### **📈 Performance Issues**
 
-| Problem | Symptom | Solution |
-|---------|---------|----------|
+| Problem                       | Symptom                   | Solution                                                |
+| ----------------------------- | ------------------------- | ------------------------------------------------------- |
 | **Poor Directional Accuracy** | < 50% correct predictions | Try different symbols, longer training, or larger model |
-| **High Loss Values** | Train/Val loss > 1.0 | Check data normalization, reduce learning rate |
-| **Overfitting** | Train loss << Val loss | Reduce model size, add dropout, more data |
-| **Slow Training** | Very slow epochs | Use GPU (`device='cuda'`), reduce batch size |
+| **High Loss Values**          | Train/Val loss > 1.0      | Check data normalization, reduce learning rate          |
+| **Overfitting**               | Train loss << Val loss    | Reduce model size, add dropout, more data               |
+| **Slow Training**             | Very slow epochs          | Use GPU (`device='cuda'`), reduce batch size            |
 
 ### **🔍 Data Quality Checks**
 
@@ -700,7 +744,7 @@ The codebase includes automatic data quality validation:
 def check_data_quality(df, stage):
     """🔍 Comprehensive data quality checking"""
     # ✅ NaN value detection
-    # ✅ Infinite value detection  
+    # ✅ Infinite value detection
     # ✅ Data range validation
     # ✅ Feature correlation analysis
     # ✅ Automatic reporting and warnings
@@ -737,6 +781,7 @@ print(f"📈 Data shapes: {next(iter(train_loader))}")
 <td width="50%">
 
 **📝 Code Standards**
+
 - ✅ Keep sequential prediction methods only
 - ✅ Maintain centralized configuration
 - ✅ Add comprehensive data quality checks
@@ -748,6 +793,7 @@ print(f"📈 Data shapes: {next(iter(train_loader))}")
 <td width="50%">
 
 **🧪 Testing Requirements**
+
 - ✅ Test model components individually
 - ✅ Validate training pipeline end-to-end
 - ✅ Check data quality and preprocessing
@@ -784,7 +830,7 @@ print(f"📈 Data shapes: {next(iter(train_loader))}")
 
 **This project is open source and available under the [MIT License](LICENSE).**
 
-*Feel free to use, modify, and distribute for both personal and commercial purposes.*
+_Feel free to use, modify, and distribute for both personal and commercial purposes._
 
 </div>
 
@@ -797,36 +843,39 @@ print(f"📈 Data shapes: {next(iter(train_loader))}")
 <td width="33%">
 
 ### **🎓 Academic Papers**
+
 1. **Temporal Fusion Transformers**  
-   *Lim, B., et al. (2021)*  
+   _Lim, B., et al. (2021)_  
    International Journal of Forecasting
 
 2. **Attention Is All You Need**  
-   *Vaswani, A., et al. (2017)*  
+   _Vaswani, A., et al. (2017)_  
    NIPS Conference
 
 </td>
 <td width="33%">
 
 ### **📊 Financial Research**
+
 3. **Financial Time Series Analysis**  
-   *Various academic papers*  
+   _Various academic papers_  
    Stock prediction methodologies
 
 4. **Market Efficiency Studies**  
-   *Fama, E. F. (1970)*  
+   _Fama, E. F. (1970)_  
    Efficient Market Hypothesis
 
 </td>
 <td width="33%">
 
 ### **� Technical Resources**
+
 5. **PyTorch Documentation**  
-   *Official PyTorch Docs*  
+   _Official PyTorch Docs_  
    Deep Learning Framework
 
 6. **yfinance Library**  
-   *Open Source Finance Data*  
+   _Open Source Finance Data_  
    Stock data acquisition
 
 </td>
@@ -841,7 +890,7 @@ print(f"📈 Data shapes: {next(iter(train_loader))}")
 
 **⭐ Star this repository if you found it helpful!**
 
-*This implementation prioritizes honest evaluation over inflated metrics, providing a solid foundation for real-world trading applications.*
+_This implementation prioritizes honest evaluation over inflated metrics, providing a solid foundation for real-world trading applications._
 
 ---
 
