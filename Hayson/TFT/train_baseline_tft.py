@@ -469,7 +469,7 @@ def create_training_plot(train_losses: List[float], val_losses: List[float]):
 def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device: torch.device,
                             symbols: List[str] = None, start_date: str = '2020-01-01', 
                             end_date: str = '2023-12-31'):
-    """Analyze model performance and create visualizations including absolute price reconstruction."""
+    """Analyze model performance using only sequential (walk-forward) prediction method."""
     
     # Use default symbols if none provided
     if symbols is None:
@@ -477,22 +477,20 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
     
     print("📈 Analyzing model performance...")
     
-    # Compare batch vs sequential prediction methods
-    comparison_results = compare_prediction_methods(
-        model=model,
-        val_loader=val_loader, 
-        device=device,
-        num_sequential_steps=50  # Predict 50 days sequentially
+    # Use only sequential prediction (walk-forward, no future peeking)
+    print("🔮 Performing sequential prediction validation...")
+    initial_data, true_returns = get_sequential_validation_data(val_loader, device)
+    
+    # Limit sequential steps to available data  
+    num_sequential_steps = min(50, len(true_returns))
+    
+    predictions, attention_history = sequential_prediction(
+        model, initial_data, num_sequential_steps, device
     )
     
-    # Use sequential predictions for main analysis (no future peeking)
-    predictions = comparison_results['sequential_predictions']
-    targets = comparison_results['sequential_targets']
-    attention_weights = np.array([h['attention'] for h in comparison_results['attention_history']])
-    
-    # Also keep batch results for comparison
-    batch_predictions = comparison_results['batch_predictions']
-    batch_targets = comparison_results['batch_targets']
+    # Use first num_sequential_steps of true returns for comparison
+    targets = true_returns[:num_sequential_steps]
+    attention_weights = np.array([h['attention'] for h in attention_history])
     
     # Reconstruct absolute prices for visualization
     print("📊 Reconstructing absolute prices from returns...")
@@ -520,102 +518,23 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
             if val_start_idx + viz_samples < len(close_prices):
                 starting_prices = close_prices[val_start_idx:val_start_idx + viz_samples]
                 
-                # Reconstruct sequential predictions (no future peeking)
-                seq_pred_prices = starting_prices * (1 + predictions[:viz_samples])
-                seq_actual_prices = starting_prices * (1 + targets[:viz_samples])
-                
-                # Also reconstruct batch predictions for comparison
-                batch_viz_samples = min(len(batch_predictions), viz_samples)
-                batch_pred_prices = starting_prices[:batch_viz_samples] * (1 + batch_predictions[:batch_viz_samples])
-                batch_actual_prices = starting_prices[:batch_viz_samples] * (1 + batch_targets[:batch_viz_samples])
-                
-                # Create comprehensive comparison plot
-                plt.figure(figsize=(20, 15))
-                
-                # Main comparison: Sequential vs Batch predictions
-                plt.subplot(4, 3, 1)
-                time_points = range(len(seq_pred_prices))
-                plt.plot(time_points, seq_actual_prices, label=f'Actual {symbol} Price', 
-                        color='blue', linewidth=2, alpha=0.8)
-                plt.plot(time_points, seq_pred_prices, label=f'Sequential Pred (No Peeking)', 
-                        color='red', linewidth=2, alpha=0.8)
-                plt.plot(time_points[:batch_viz_samples], batch_pred_prices, label=f'Batch Pred (With Peeking)', 
-                        color='orange', linewidth=2, alpha=0.6, linestyle='--')
-                plt.xlabel('Time Steps')
-                plt.ylabel('Stock Price ($)')
-                plt.title(f'{symbol} Sequential vs Batch Prediction Comparison')
-                plt.legend()
-                plt.grid(True, alpha=0.3)
-                
-                # Calculate metrics for sequential predictions
-                seq_price_mae = np.mean(np.abs(seq_pred_prices - seq_actual_prices))
-                seq_price_rmse = np.sqrt(np.mean((seq_pred_prices - seq_actual_prices)**2))
-                seq_price_mape = np.mean(np.abs((seq_pred_prices - seq_actual_prices) / seq_actual_prices)) * 100
-                
-                # Calculate metrics for batch predictions
-                batch_price_mae = np.mean(np.abs(batch_pred_prices - batch_actual_prices))
-                batch_price_rmse = np.sqrt(np.mean((batch_pred_prices - batch_actual_prices)**2))
-                batch_price_mape = np.mean(np.abs((batch_pred_prices - batch_actual_prices) / batch_actual_prices)) * 100
-                
-                plt.text(0.02, 0.98, f'Sequential (No Peeking):\nMAE: ${seq_price_mae:.2f}\nRMSE: ${seq_price_rmse:.2f}\nMAPE: {seq_price_mape:.1f}%\n\nBatch (With Peeking):\nMAE: ${batch_price_mae:.2f}\nRMSE: ${batch_price_rmse:.2f}\nMAPE: {batch_price_mape:.1f}%', 
-                        transform=plt.gca().transAxes, verticalalignment='top',
-                        bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
-                
-                # Future Peeking Impact Visualization
-                plt.subplot(4, 3, 2)
-                metrics_comparison = ['MAE', 'RMSE', 'MAPE']
-                sequential_vals = [seq_price_mae, seq_price_rmse, seq_price_mape]
-                batch_vals = [batch_price_mae, batch_price_rmse, batch_price_mape]
-                
-                x = np.arange(len(metrics_comparison))
-                width = 0.35
-                
-                plt.bar(x - width/2, sequential_vals, width, label='Sequential (No Peeking)', 
-                       color='red', alpha=0.7)
-                plt.bar(x + width/2, batch_vals, width, label='Batch (With Peeking)', 
-                       color='orange', alpha=0.7)
-                
-                plt.xlabel('Metrics')
-                plt.ylabel('Values')
-                plt.title('Future Peeking Impact on Price Prediction')
-                plt.xticks(x, metrics_comparison)
-                plt.legend()
-                plt.grid(True, alpha=0.3, axis='y')
-                
-                # Sequential prediction error distribution
-                plt.subplot(4, 3, 3)
-                seq_price_errors = seq_pred_prices - seq_actual_prices
-                plt.hist(seq_price_errors, bins=20, alpha=0.7, color='lightcoral', edgecolor='black')
-                plt.xlabel('Sequential Price Prediction Error ($)')
-                plt.ylabel('Frequency')
-                plt.title('Sequential Prediction Error Distribution')
-                plt.axvline(x=0, color='red', linestyle='--', alpha=0.8)
-                plt.grid(True, alpha=0.3)
-                
-                print(f"✅ Price reconstruction completed for {symbol}")
-                print(f"   Sequential (No Peeking) - MAE: ${seq_price_mae:.2f}, RMSE: ${seq_price_rmse:.2f}, MAPE: {seq_price_mape:.1f}%")
-                print(f"   Batch (With Peeking) - MAE: ${batch_price_mae:.2f}, RMSE: ${batch_price_rmse:.2f}, MAPE: {batch_price_mape:.1f}%")
-                print(f"   Performance degradation: MAE +{((seq_price_mae-batch_price_mae)/batch_price_mae*100):.1f}%, RMSE +{((seq_price_rmse-batch_price_rmse)/batch_price_rmse*100):.1f}%")
-                
-                # Reconstruct predicted prices: P_t+1 = P_t * (1 + return_t+1)
+                # Reconstruct sequential predictions (walk-forward, no future peeking)
                 pred_prices = starting_prices * (1 + predictions[:viz_samples])
                 actual_prices = starting_prices * (1 + targets[:viz_samples])
                 
-                # Create absolute price comparison plot
-                plt.figure(figsize=(18, 12))
-                
-                # Original plot layout (2x3) + new absolute price plot (make it 3x3)
+                # Create price comparison plot
+                plt.figure(figsize=(15, 12))
                 
                 # Absolute Price Comparison - Main feature
                 plt.subplot(3, 3, 1)
                 time_points = range(len(pred_prices))
                 plt.plot(time_points, actual_prices, label=f'Actual {symbol} Price', 
                         color='blue', linewidth=2, alpha=0.8)
-                plt.plot(time_points, pred_prices, label=f'Predicted {symbol} Price', 
+                plt.plot(time_points, pred_prices, label=f'Sequential Predictions', 
                         color='red', linewidth=2, alpha=0.8)
                 plt.xlabel('Time Steps')
                 plt.ylabel('Stock Price ($)')
-                plt.title(f'{symbol} Predicted vs Actual Prices (Absolute)')
+                plt.title(f'{symbol} Sequential Predictions vs Actual Prices')
                 plt.legend()
                 plt.grid(True, alpha=0.3)
                 
@@ -624,7 +543,7 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
                 price_rmse = np.sqrt(np.mean((pred_prices - actual_prices)**2))
                 price_mape = np.mean(np.abs((pred_prices - actual_prices) / actual_prices)) * 100
                 
-                plt.text(0.02, 0.98, f'Price MAE: ${price_mae:.2f}\nPrice RMSE: ${price_rmse:.2f}\nPrice MAPE: {price_mape:.1f}%', 
+                plt.text(0.02, 0.98, f'Sequential Predictions:\nMAE: ${price_mae:.2f}\nRMSE: ${price_rmse:.2f}\nMAPE: {price_mape:.1f}%', 
                         transform=plt.gca().transAxes, verticalalignment='top',
                         bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
                 
@@ -634,7 +553,7 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
                 plt.hist(price_errors, bins=20, alpha=0.7, color='lightcoral', edgecolor='black')
                 plt.xlabel('Price Prediction Error ($)')
                 plt.ylabel('Frequency')
-                plt.title('Price Prediction Error Distribution')
+                plt.title('Sequential Prediction Error Distribution')
                 plt.axvline(x=0, color='red', linestyle='--', alpha=0.8)
                 plt.grid(True, alpha=0.3)
                 
@@ -649,9 +568,7 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
                 plt.grid(True, alpha=0.3)
                 
                 print(f"✅ Price reconstruction completed for {symbol}")
-                print(f"   Price MAE: ${price_mae:.2f}")
-                print(f"   Price RMSE: ${price_rmse:.2f}")
-                print(f"   Price MAPE: {price_mape:.1f}%")
+                print(f"   Sequential Predictions - MAE: ${price_mae:.2f}, RMSE: ${price_rmse:.2f}, MAPE: {price_mape:.1f}%")
             else:
                 print("⚠️  Not enough validation data for price reconstruction")
                 plt.figure(figsize=(15, 12))
@@ -663,13 +580,10 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
         print("📊 Continuing with returns-based analysis...")
         plt.figure(figsize=(15, 12))
     
-    # Continue with existing analysis (adjust subplot positions)
-    subplot_start = 4 if 'seq_pred_prices' in locals() else 1
-    subplot_layout = (4, 3) if 'seq_pred_prices' in locals() else (2, 3)
-    subplot_layout = (3, 3) if 'pred_prices' in locals() else (2, 3)
+    # Continue with returns-based analysis
     
     # Predictions vs Targets
-    plt.subplot(*subplot_layout, subplot_start)
+    plt.subplot(3, 3, 4)
     plt.scatter(targets, predictions, alpha=0.6, s=20)
     min_val = min(np.min(targets), np.min(predictions))
     max_val = max(np.max(targets), np.max(predictions))
@@ -686,7 +600,7 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
              bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
     
     # Residuals
-    plt.subplot(*subplot_layout, subplot_start + 1)
+    plt.subplot(3, 3, 5)
     residuals = predictions - targets
     plt.scatter(predictions, residuals, alpha=0.6, s=20)
     plt.axhline(y=0, color='red', linestyle='--', alpha=0.8)
@@ -696,7 +610,7 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
     plt.grid(True, alpha=0.3)
     
     # Error distribution
-    plt.subplot(*subplot_layout, subplot_start + 2)
+    plt.subplot(3, 3, 6)
     plt.hist(residuals, bins=30, alpha=0.7, color='skyblue', edgecolor='black')
     plt.xlabel('Residuals')
     plt.ylabel('Frequency')
@@ -705,10 +619,10 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
     plt.grid(True, alpha=0.3)
     
     # Time series comparison (sequential predictions)
-    plt.subplot(*subplot_layout, subplot_start + 3)
+    plt.subplot(3, 3, 7)
     sample_size = min(len(targets), len(predictions))
     plt.plot(targets[:sample_size], label='Actual Returns', color='blue', alpha=0.8)
-    plt.plot(predictions[:sample_size], label='Sequential Predictions (No Peeking)', color='red', alpha=0.8)
+    plt.plot(predictions[:sample_size], label='Sequential Predictions', color='red', alpha=0.8)
     plt.title('Sequential Prediction: Returns Time Series')
     plt.xlabel('Time Steps')
     plt.ylabel('Returns')
@@ -716,7 +630,7 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
     plt.grid(True, alpha=0.3)
     
     # Attention heatmap (average across samples)
-    plt.subplot(*subplot_layout, subplot_start + 4)
+    plt.subplot(3, 3, 8)
     avg_attention = np.mean(attention_weights, axis=0)
     plt.imshow(avg_attention, cmap='Blues', aspect='auto')
     plt.colorbar()
@@ -725,7 +639,7 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
     plt.title('Average Attention Weights')
     
     # Performance metrics
-    plt.subplot(*subplot_layout, subplot_start + 5)
+    plt.subplot(3, 3, 9)
     mae = np.mean(np.abs(residuals))
     rmse = np.sqrt(np.mean(residuals**2))
     mape = np.mean(np.abs(residuals / (np.abs(targets) + 1e-8))) * 100
@@ -735,7 +649,7 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
     pred_direction = np.sign(predictions[1:])
     directional_accuracy = np.mean(actual_direction == pred_direction) * 100
     
-    metrics_text = f'''Sequential Prediction Metrics (No Future Peeking):
+    metrics_text = f'''Sequential Prediction Metrics:
 
 MAE: {mae:.4f}
 RMSE: {rmse:.4f}
@@ -758,17 +672,12 @@ Prediction Method: Walk-forward, No Future Peeking
     plt.close()
     
     print("📊 Performance analysis saved as 'baseline_tft_analysis_sequential.png'")
-    print(f"📈 Sequential Prediction Performance Summary (No Future Peeking):")
+    print(f"📈 Sequential Prediction Performance Summary:")
     print(f"   MAE: {mae:.4f}")
     print(f"   RMSE: {rmse:.4f}")
     print(f"   R²: {r_squared:.3f}")
     print(f"   Directional Accuracy: {directional_accuracy:.1f}%")
     print(f"   Sequential Steps: {len(predictions)}")
-    
-    # Show comparison with batch method
-    print(f"\n🔍 Future Peeking Impact Summary:")
-    for metric, degradation in comparison_results['degradation'].items():
-        print(f"   {metric.upper()} degradation: +{degradation:.1f}%")
     
     # Optional: Run trading simulation on sequential predictions
     try:
@@ -1116,117 +1025,6 @@ def get_sequential_validation_data(val_loader: DataLoader, device: torch.device)
     
     return initial_data, true_returns
 
-
-def compare_prediction_methods(model: BaselineTFT, 
-                              val_loader: DataLoader, 
-                              device: torch.device,
-                              num_sequential_steps: int = 50) -> Dict:
-    """
-    Compare traditional batch prediction vs sequential prediction to show future peeking impact.
-    
-    Returns:
-        Dictionary with comparison results
-    """
-    print("🔍 Comparing batch vs sequential prediction methods...")
-    
-    # Method 1: Traditional batch prediction (with future peeking)
-    print("\n1️⃣ Traditional batch prediction (with future peeking):")
-    model.eval()
-    batch_predictions = []
-    batch_targets = []
-    
-    with torch.no_grad():
-        for batch in val_loader:
-            batch = {k: v.to(device) for k, v in batch.items()}
-            outputs = model(batch)
-            
-            # Use median quantile
-            pred = outputs['prediction'][:, :, 2].cpu().numpy().flatten()
-            target = batch['target'].cpu().numpy().flatten()
-            
-            batch_predictions.extend(pred)
-            batch_targets.extend(target)
-    
-    batch_predictions = np.array(batch_predictions)
-    batch_targets = np.array(batch_targets)
-    
-    # Method 2: Sequential prediction (no future peeking)
-    print("\n2️⃣ Sequential prediction (no future peeking):")
-    initial_data, true_returns = get_sequential_validation_data(val_loader, device)
-    
-    # Limit sequential steps to available data
-    max_steps = min(num_sequential_steps, len(true_returns))
-    
-    sequential_predictions, attention_history = sequential_prediction(
-        model, initial_data, max_steps, device
-    )
-    
-    # Use first max_steps of true returns for comparison
-    sequential_targets = true_returns[:max_steps]
-    
-    # Calculate metrics for both methods
-    def calculate_metrics(predictions, targets, method_name):
-        mae = np.mean(np.abs(predictions - targets))
-        rmse = np.sqrt(np.mean((predictions - targets)**2))
-        corr = np.corrcoef(predictions, targets)[0, 1] if len(predictions) > 1 else 0
-        
-        # Directional accuracy
-        pred_direction = np.sign(predictions[1:])
-        true_direction = np.sign(targets[1:]) 
-        dir_acc = np.mean(pred_direction == true_direction) * 100 if len(predictions) > 1 else 0
-        
-        print(f"   {method_name} Metrics:")
-        print(f"     MAE: {mae:.4f}")
-        print(f"     RMSE: {rmse:.4f}")
-        print(f"     Correlation: {corr:.3f}")
-        print(f"     Directional Accuracy: {dir_acc:.1f}%")
-        print(f"     Samples: {len(predictions)}")
-        
-        return {
-            'mae': mae,
-            'rmse': rmse, 
-            'correlation': corr,
-            'directional_accuracy': dir_acc,
-            'samples': len(predictions)
-        }
-    
-    # Calculate metrics
-    batch_metrics = calculate_metrics(
-        batch_predictions[:max_steps], 
-        batch_targets[:max_steps], 
-        "Batch (Future Peeking)"
-    )
-    
-    sequential_metrics = calculate_metrics(
-        sequential_predictions,
-        sequential_targets,
-        "Sequential (No Peeking)"
-    )
-    
-    # Performance degradation analysis
-    mae_degradation = (sequential_metrics['mae'] - batch_metrics['mae']) / batch_metrics['mae'] * 100
-    rmse_degradation = (sequential_metrics['rmse'] - batch_metrics['rmse']) / batch_metrics['rmse'] * 100
-    corr_degradation = (batch_metrics['correlation'] - sequential_metrics['correlation']) / abs(batch_metrics['correlation']) * 100
-    
-    print(f"\n📊 Future Peeking Impact:")
-    print(f"   MAE degradation: +{mae_degradation:.1f}%")
-    print(f"   RMSE degradation: +{rmse_degradation:.1f}%") 
-    print(f"   Correlation degradation: -{corr_degradation:.1f}%")
-    
-    return {
-        'batch_predictions': batch_predictions[:max_steps],
-        'batch_targets': batch_targets[:max_steps],
-        'batch_metrics': batch_metrics,
-        'sequential_predictions': sequential_predictions,
-        'sequential_targets': sequential_targets,
-        'sequential_metrics': sequential_metrics,
-        'attention_history': attention_history,
-        'degradation': {
-            'mae': mae_degradation,
-            'rmse': rmse_degradation,
-            'correlation': corr_degradation
-        }
-    }
 
 
 if __name__ == "__main__":
