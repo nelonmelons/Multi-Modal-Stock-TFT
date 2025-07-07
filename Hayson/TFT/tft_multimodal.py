@@ -44,12 +44,28 @@ class NewsDownsampler(nn.Module):
         self.residual_proj = nn.Linear(news_dim, out_dim) if news_dim != out_dim else nn.Identity()
 
     def forward(self, news, context):
+        # project news and context (might be [B, D] or [B, T, D])
         news_proj = self.fc_news(news)
         context_proj = self.fc_context(context)
+
+        # align time dims if one is 2-D and the other 3-D
+        if news_proj.dim() == 2 and context_proj.dim() == 3:
+            news_proj = news_proj.unsqueeze(1).expand(-1, context_proj.size(1), -1)
+        elif context_proj.dim() == 2 and news_proj.dim() == 3:
+            context_proj = context_proj.unsqueeze(1).expand(-1, news_proj.size(1), -1)
+
+        # fuse
         fusion = torch.cat([news_proj, context_proj], dim=-1)
         out = self.fc_fusion(fusion)
-        # Residual connection from news input
-        out = out + self.residual_proj(news)
+
+        # choose residual input (original news if projecting, else use projected news)
+        residual = news if isinstance(self.residual_proj, nn.Linear) else news_proj
+        out = out + self.residual_proj(residual)
+
+        # if we still have a time dim, reduce it
+        if out.dim() == 3:
+            out = out.mean(dim=1)
+
         return out
 
 
@@ -59,8 +75,9 @@ class GatedResidualNetwork(nn.Module):
         if output_dim is None:
             output_dim = input_dim
         self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.gelu = nn.GELU()
+        self.swish = nn.SiLU()  # Swish activation
         self.fc2 = nn.Linear(hidden_dim, output_dim)
+        self.gelu = nn.GELU()  # GELU activation
         self.dropout = nn.Dropout(dropout)
         self.gate = nn.GLU()
         self.skip = nn.Linear(input_dim, output_dim) if input_dim != output_dim else nn.Identity()
@@ -69,9 +86,10 @@ class GatedResidualNetwork(nn.Module):
     def forward(self, x):
         residual = self.skip(x)
         x = self.fc1(x)
-        x = self.gelu(x)
+        x = self.swish(x)  # First activation: Swish
         x = self.dropout(x)
         x = self.fc2(x)
+        x = self.gelu(x)  # Second activation: GELU
         x = self.gate(torch.cat([x, x], dim=-1))
         x = self.norm(x + residual)
         return x
@@ -132,6 +150,7 @@ class TFT(nn.Module):
         self.hidden_size = hidden_size
         self.seq_len = seq_len
         self.prediction_len = prediction_len
+        self.news_downsample_dim = news_downsample_dim  # Store for later use
 
         # If input_var_dims not provided, assume each feature is 1-dim
         if input_var_dims is None:
@@ -158,13 +177,16 @@ class TFT(nn.Module):
         self.attn_norm = nn.LayerNorm(hidden_size)
         # Decoder GRN
         self.decoder_grn = GatedResidualNetwork(hidden_size, hidden_size, dropout=dropout)
-        # Final fusion and prediction head
+        # Final fusion and prediction head with enhanced activation
         self.fusion = nn.Linear(hidden_size + news_downsample_dim, hidden_size)
         self.prediction_head = nn.Sequential(
-            nn.GELU(),
+            nn.SiLU(),  # Swish activation
             nn.Linear(hidden_size, hidden_size // 2),
-            nn.GELU(),
-            nn.Linear(hidden_size // 2, prediction_len)
+            nn.GELU(),  # GELU activation
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size // 2, hidden_size // 4),
+            nn.SiLU(),  # Another Swish
+            nn.Linear(hidden_size // 4, prediction_len)
         )
         self._init_weights()
 
@@ -175,10 +197,10 @@ class TFT(nn.Module):
                 if module.bias is not None:
                     torch.nn.init.zeros_(module.bias)
 
-    def forward(self, x, news):
+    def forward(self, x, news=None):
         """
         x: [B, T, F] (non-news features)
-        news: [B, news_dim] (news embedding for the prediction window)
+        news: [B, news_dim] (news embedding for the prediction window) - can be None
         """
         # Split x into variables
         splits = torch.split(x, self.input_var_dims, dim=-1)
@@ -197,13 +219,178 @@ class TFT(nn.Module):
         dec_out = self.decoder_grn(attn_out)
         # Use last timestep for prediction
         last_hidden = dec_out[:, -1, :]  # [B, hidden_size]
-        # News downsampling, conditioned on last_hidden
-        news_down = self.news_downsampler(news, last_hidden)  # [B, news_downsample_dim]
-        # Concatenate
-        fusion = torch.cat([last_hidden, news_down], dim=-1)
+
+        # Handle news embedding (optional)
+        if news is not None:
+            # News downsampling, conditioned on last_hidden
+            news_down = self.news_downsampler(news, last_hidden)  # [B, news_downsample_dim]
+            # Concatenate
+            fusion = torch.cat([last_hidden, news_down], dim=-1)
+        else:
+            # No news data - use only the hidden state
+            # Pad with zeros to match expected fusion dimension (news_downsample_dim)
+            batch_size = last_hidden.shape[0]
+            news_padding = torch.zeros(batch_size, self.news_downsample_dim,
+                                     device=last_hidden.device, dtype=last_hidden.dtype)
+            fusion = torch.cat([last_hidden, news_padding], dim=-1)
+
         fusion = self.fusion(fusion)
         # Prediction
         prediction = self.prediction_head(fusion)
+        return prediction
+
+
+class EnhancedTFT(nn.Module):
+    """Enhanced Temporal Fusion Transformer with deeper architecture and gated residual connections."""
+
+    def __init__(
+            self,
+            input_size,
+            news_dim,
+            hidden_size=128,
+            num_heads=8,
+            dropout=0.1,
+            seq_len=60,
+            prediction_len=10,
+            news_downsample_dim=64,
+            num_layers=3,
+            num_decoder_layers=2,
+            input_var_dims=None
+    ):
+        super().__init__()
+        self.input_size = input_size
+        self.news_dim = news_dim
+        self.hidden_size = hidden_size
+        self.seq_len = seq_len
+        self.prediction_len = prediction_len
+        self.news_downsample_dim = news_downsample_dim
+        self.num_layers = num_layers
+        self.num_decoder_layers = num_decoder_layers
+
+        # If input_var_dims not provided, assume each feature is 1-dim
+        if input_var_dims is None:
+            input_var_dims = [1] * input_size
+        self.input_var_dims = input_var_dims
+
+        # Feature embedding for each variable (excluding news)
+        self.feature_embeddings = nn.ModuleList([
+            nn.Linear(dim, hidden_size) for dim in input_var_dims
+        ])
+
+        # Enhanced VSN with multiple layers
+        self.vsn = VariableSelectionNetwork([hidden_size] * len(input_var_dims), hidden_size, dropout=dropout)
+
+        # News downsampler: conditional on encoded rest-of-input
+        self.news_downsampler = NewsDownsampler(news_dim, hidden_size, news_downsample_dim)
+
+        # Multiple encoder GRN layers with residual connections
+        self.encoder_grns = nn.ModuleList([
+            GatedResidualNetwork(hidden_size, hidden_size, dropout=dropout)
+            for _ in range(num_layers)
+        ])
+
+        # Multi-head attention layers
+        self.attention_layers = nn.ModuleList([
+            nn.MultiheadAttention(
+                embed_dim=hidden_size,
+                num_heads=num_heads,
+                dropout=dropout,
+                batch_first=True
+            ) for _ in range(num_layers)
+        ])
+
+        self.attn_norms = nn.ModuleList([
+            nn.LayerNorm(hidden_size) for _ in range(num_layers)
+        ])
+
+        # Multiple decoder GRN layers
+        self.decoder_grns = nn.ModuleList([
+            GatedResidualNetwork(hidden_size, hidden_size, dropout=dropout)
+            for _ in range(num_decoder_layers)
+        ])
+
+        # Enhanced fusion and prediction head
+        self.fusion = nn.Sequential(
+            nn.Linear(hidden_size + news_downsample_dim, hidden_size),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, hidden_size)
+        )
+
+        self.prediction_head = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size // 2, hidden_size // 4),
+            nn.GELU(),
+            nn.Linear(hidden_size // 4, prediction_len)
+        )
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+
+    def forward(self, x, news=None):
+        """
+        x: [B, T, F] (non-news features)
+        news: [B, news_dim] (news embedding for the prediction window) - can be None
+        """
+        # Split x into variables
+        splits = torch.split(x, self.input_var_dims, dim=-1)
+        var_embs = []
+        for i, emb in enumerate(self.feature_embeddings):
+            var_embs.append(emb(splits[i]))  # [B, T, hidden_size]
+        x_cat = torch.cat(var_embs, dim=-1)  # [B, T, hidden_size * num_vars]
+
+        # VSN
+        x_vsn, _ = self.vsn(x_cat)  # [B, T, hidden_size]
+
+        # Multiple encoder layers with residual connections
+        x_enc = x_vsn
+        for i in range(self.num_layers):
+            # Encoder GRN
+            grn_out = self.encoder_grns[i](x_enc)
+
+            # Self-attention with residual connection
+            attn_out, _ = self.attention_layers[i](grn_out, grn_out, grn_out)
+            x_enc = self.attn_norms[i](grn_out + attn_out)
+
+        # Multiple decoder layers
+        dec_out = x_enc
+        for i in range(self.num_decoder_layers):
+            dec_out = self.decoder_grns[i](dec_out)
+
+        # Use last timestep for prediction
+        last_hidden = dec_out[:, -1, :]  # [B, hidden_size]
+
+        # Handle news embedding (optional)
+        if news is not None:
+            # News downsampling, conditioned on last_hidden
+            news_down = self.news_downsampler(news, last_hidden)  # [B, news_downsample_dim]
+            # Concatenate
+            fusion_input = torch.cat([last_hidden, news_down], dim=-1)
+        else:
+            # No news data - use only the hidden state
+            # Pad with zeros to match expected fusion dimension (news_downsample_dim)
+            batch_size = last_hidden.shape[0]
+            news_padding = torch.zeros(batch_size, self.news_downsample_dim,
+                                     device=last_hidden.device, dtype=last_hidden.dtype)
+            fusion_input = torch.cat([last_hidden, news_padding], dim=-1)
+
+        # Enhanced fusion
+        fusion = self.fusion(fusion_input)
+
+        # Prediction with residual connection
+        prediction = self.prediction_head(fusion + last_hidden)
         return prediction
 
 
@@ -617,16 +804,21 @@ def prepare_data_for_training(datamodule, device, max_batches=20):
     return train_data, val_data
 
 
-def train_model(model, train_data, val_data, device, epochs=10, lr=0.001):
-    """Train the model with pure PyTorch and enhanced tqdm progress bars."""
+def train_model(model, train_data, val_data, device, epochs=10, lr=0.001, weight_decay=0.01):
+    """Train the model with pure PyTorch, AdamW optimizer, and cosine learning rate scheduler."""
 
     print(f"🏋️ Training model on {device} for {epochs} epochs...")
     print(f"📊 Training samples: {len(train_data)}, Validation samples: {len(val_data)}")
-    print(f"📝 Learning rate: {lr}, Device: {device}")
+    print(f"📝 Learning rate: {lr}, Weight decay: {weight_decay}, Device: {device}")
     print("=" * 80)
 
     model = model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # Use AdamW optimizer with weight decay
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    # Use cosine annealing learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr/10)
+
     criterion = nn.MSELoss()
 
     train_losses = []
@@ -743,10 +935,11 @@ def train_model(model, train_data, val_data, device, epochs=10, lr=0.001):
 
                 # Update progress bar with enhanced metrics
                 current_avg = train_loss / train_batches
+                current_lr = optimizer.param_groups[0]['lr']
                 train_pbar.set_postfix({
                     'loss': f"{loss.item():.5f}",
                     'avg': f"{current_avg:.5f}",
-                    'lr': f"{lr:.1e}",
+                    'lr': f"{current_lr:.1e}",
                     'batch': f"{batch_idx + 1}"
                 })
 
@@ -838,10 +1031,15 @@ def train_model(model, train_data, val_data, device, epochs=10, lr=0.001):
         train_losses.append(avg_train_loss)
         val_losses.append(avg_val_loss)
 
+        # Step the learning rate scheduler
+        scheduler.step()
+        current_lr = optimizer.param_groups[0]['lr']
+
         # Update main epoch progress bar with comprehensive metrics
         epoch_pbar.set_postfix({
             '🚂 Train': f"{avg_train_loss:.5f}",
             '📊 Val': f"{avg_val_loss:.5f}",
+            '📈 LR': f"{current_lr:.1e}",
             '📦 T.Batch': train_batches,
             '📦 V.Batch': val_batches,
             '📈 Improve': '✅' if epoch > 0 and avg_val_loss < val_losses[-2] else '⚠️'
@@ -937,45 +1135,6 @@ def generate_predictions(model, val_data, device):
 
                             # For TFT, we'll use encoder features for training (past data to predict future)
                             features = encoder_tensor
-
-                        elif encoder_features:
-                            # Only encoder features available
-                            features = torch.cat(encoder_features, dim=-1)
-
-                        else:
-                            # Fallback: process all non-target tensors
-                            all_tensors = []
-
-                            for key, value in x.items():
-                                if torch.is_tensor(
-                                        value) and 'target' not in key.lower() and 'scale' not in key.lower():
-                                    # Convert to 3D tensor [batch, seq_len, features]
-                                    if value.dim() == 3:
-                                        processed = value.float()
-                                    elif value.dim() == 2:
-                                        processed = value.unsqueeze(1).float()
-                                    elif value.dim() == 1:
-                                        processed = value.unsqueeze(1).unsqueeze(-1).float()
-                                    else:
-                                        continue
-
-                                    all_tensors.append(processed)
-
-                            if all_tensors:
-                                # Find common sequence length (use the most common)
-                                seq_lens = [t.shape[1] for t in all_tensors]
-                                from collections import Counter
-                                common_seq_len = Counter(seq_lens).most_common(1)[0][0]
-
-                                # Filter tensors with common sequence length
-                                filtered_tensors = [t for t in all_tensors if t.shape[1] == common_seq_len]
-
-                                if filtered_tensors:
-                                    features = torch.cat(filtered_tensors, dim=-1)
-                                else:
-                                    continue
-                            else:
-                                continue
 
                     elif torch.is_tensor(x):
                         # x is already a tensor - ensure it's 3D

@@ -141,16 +141,17 @@ class TFTDataModule:
         Identify different types of feature columns according to proposed features table.
         
         Returns categorized features for TFT model:
-        - static_categoricals: sector, symbol (static categorical)
+        - static_categoricals: sector (static categorical) - REMOVED symbol to prevent model from knowing which stock it is
         - static_reals: market_cap (static real)  
         - time_varying_known_reals: calendar + economic + events (known future)
         - time_varying_unknown_reals: OHLCV + technical + news (past observed)
         """
         
         # Static categorical features (don't change over time)
+        # NOTE: Removed 'symbol' to prevent model from knowing which stock it is predicting
+        # This forces the model to learn from the actual features rather than memorizing stock-specific patterns
         static_categoricals = []
-        if 'symbol' in self.feature_df.columns:
-            static_categoricals.append('symbol')
+        # Do NOT add 'symbol' here - this would allow the model to cheat
         if 'sector' in self.feature_df.columns:
             static_categoricals.append('sector')
         
