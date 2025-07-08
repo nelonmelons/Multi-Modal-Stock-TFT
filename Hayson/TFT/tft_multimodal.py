@@ -24,7 +24,6 @@ import dotenv
 
 dotenv.load_dotenv()
 
-
 class NewsDownsampler(nn.Module):
     """
     Conditional encoder for news embeddings, conditioned on the encoded rest of the input.
@@ -68,7 +67,6 @@ class NewsDownsampler(nn.Module):
 
         return out
 
-
 class GatedResidualNetwork(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim=None, dropout=0.1):
         super().__init__()
@@ -93,7 +91,6 @@ class GatedResidualNetwork(nn.Module):
         x = self.gate(torch.cat([x, x], dim=-1))
         x = self.norm(x + residual)
         return x
-
 
 class VariableSelectionNetwork(nn.Module):
     """
@@ -127,7 +124,6 @@ class VariableSelectionNetwork(nn.Module):
         weights = self.softmax(weights)
         out = (var_outputs * weights.unsqueeze(-1)).sum(dim=2)  # [B, T, hidden_dim]
         return out, weights
-
 
 class TFT(nn.Module):
     """Temporal Fusion Transformer with explicit VSN and conditional news encoder."""
@@ -238,7 +234,6 @@ class TFT(nn.Module):
         # Prediction
         prediction = self.prediction_head(fusion)
         return prediction
-
 
 class EnhancedTFT(nn.Module):
     """Enhanced Temporal Fusion Transformer with deeper architecture and gated residual connections."""
@@ -393,7 +388,6 @@ class EnhancedTFT(nn.Module):
         prediction = self.prediction_head(fusion + last_hidden)
         return prediction
 
-
 def setup_device():
     """Setup device with M1 Mac optimization."""
     if torch.backends.mps.is_available():
@@ -411,7 +405,6 @@ def setup_device():
     else:
         print("💻 Using CPU (MPS not available)")
         return torch.device("cpu")
-
 
 def prepare_data_for_training(datamodule, device, max_batches=20):
     """Prepare data for training with proper tensor handling and progress bars."""
@@ -803,7 +796,6 @@ def prepare_data_for_training(datamodule, device, max_batches=20):
 
     return train_data, val_data
 
-
 def train_model(model, train_data, val_data, device, epochs=10, lr=0.001, weight_decay=0.01):
     """Train the model with pure PyTorch, AdamW optimizer, and cosine learning rate scheduler."""
 
@@ -1061,7 +1053,6 @@ def train_model(model, train_data, val_data, device, epochs=10, lr=0.001, weight
 
     return train_losses, val_losses
 
-
 def generate_predictions(model, val_data, device):
     """Generate predictions from the trained model with progress bar."""
 
@@ -1204,7 +1195,6 @@ def generate_predictions(model, val_data, device):
 
     return predictions, actuals
 
-
 def create_visualizations(predictions, actuals, train_losses, val_losses):
     """Create comprehensive visualizations."""
 
@@ -1337,7 +1327,6 @@ Model: SimpleTFT
     plt.close()
 
     print(f"   ✅ Saved analysis to {output_path}")
-
 
 def simulate_trading(predictions, actuals):
     import numpy as np

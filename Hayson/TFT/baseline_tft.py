@@ -38,7 +38,6 @@ warnings.filterwarnings('ignore')
 # Add path for data module
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-
 class GatedResidualNetwork(nn.Module):
     """Gated Residual Network (GRN) - core TFT component."""
     
@@ -94,7 +93,6 @@ class GatedResidualNetwork(nn.Module):
             
         # Final output with layer norm
         return self.layer_norm(gated_output + residual)
-
 
 class VariableSelectionNetwork(nn.Module):
     """Variable Selection Network (VSN) - core TFT component."""
@@ -170,7 +168,6 @@ class VariableSelectionNetwork(nn.Module):
             
         return selected, selection_weights
 
-
 class InterpretableMultiHeadAttention(nn.Module):
     """Interpretable Multi-Head Attention for TFT."""
     
@@ -240,7 +237,6 @@ class InterpretableMultiHeadAttention(nn.Module):
         avg_attention = attention_weights.mean(dim=1)  # [batch, seq_len, seq_len]
         
         return output, avg_attention
-
 
 class BaselineTFT(nn.Module):
     """
@@ -462,7 +458,6 @@ class BaselineTFT(nn.Module):
             'future_weights': future_weights
         }
 
-
 class QuantileLoss(nn.Module):
     """Quantile loss for TFT training."""
     
@@ -495,7 +490,6 @@ class QuantileLoss(nn.Module):
         
         total_loss = torch.stack(losses, dim=-1).sum(dim=-1)  # [batch_size, seq_len]
         return total_loss.mean()
-
 
 def create_baseline_data(symbols: List[str] = None, 
                         start_date: str = '2020-01-01',
@@ -590,7 +584,6 @@ def create_baseline_data(symbols: List[str] = None,
     # Create sequences
     return create_sequences(combined_df, encoder_length, prediction_length)
 
-
 def calculate_rsi(prices: pd.Series, window: int = 14) -> pd.Series:
     """Calculate RSI indicator."""
     delta = prices.diff()
@@ -599,7 +592,6 @@ def calculate_rsi(prices: pd.Series, window: int = 14) -> pd.Series:
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
-
 
 def check_data_quality(df: pd.DataFrame, stage: str) -> None:
     """Check for NaN and infinite values in the dataframe."""
@@ -633,7 +625,6 @@ def check_data_quality(df: pd.DataFrame, stage: str) -> None:
             max_val = df[col].max()
             mean_val = df[col].mean()
             print(f"   {col}: [{min_val:.4f}, {max_val:.4f}], mean: {mean_val:.4f}")
-
 
 def normalize_features(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize numerical features with robust handling of NaN values."""
@@ -693,7 +684,6 @@ def normalize_features(df: pd.DataFrame) -> pd.DataFrame:
     print("✅ Feature normalization completed")
     
     return df
-
 
 def create_sequences(df: pd.DataFrame, encoder_length: int, prediction_length: int) -> Dict[str, torch.Tensor]:
     """Create sequences for TFT training."""
@@ -788,7 +778,6 @@ def create_sequences(df: pd.DataFrame, encoder_length: int, prediction_length: i
             print(f"   ✅ {key}: clean data")
     
     return batch
-
 
 if __name__ == "__main__":
     # Test baseline TFT

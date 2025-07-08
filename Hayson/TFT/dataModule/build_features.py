@@ -234,17 +234,17 @@ def add_events_features(df: pd.DataFrame, events: Dict[str, Dict[str, Any]],
     # Initialize events columns with relative timing approach
     df_events['days_to_next_earnings'] = 999     # Relative time to next earnings (key for prediction)
     df_events['days_since_earnings'] = 999       # Relative time since last earnings  
-    df_events['is_earnings_day'] = '0'             # String categorical for TFT
-    df_events['earnings_in_prediction_window'] = '0'  # NEW: String categorical for TFT
+    df_events['is_earnings_day'] = 0             # Numeric boolean for TFT
+    df_events['earnings_in_prediction_window'] = 0  # NEW: Numeric boolean for TFT
     df_events['days_to_earnings_in_window'] = 999   # NEW: Relative days to earnings within prediction window
     df_events['eps_estimate'] = 0.0              # EPS estimate for upcoming earnings
     df_events['eps_actual'] = 0.0                # Actual EPS (if reported)
     df_events['revenue_estimate'] = 0.0          # Revenue estimate
     df_events['revenue_actual'] = 0.0            # Actual revenue
     df_events['days_to_next_split'] = 999
-    df_events['is_split_day'] = '0'             # String categorical for TFT
+    df_events['is_split_day'] = 0               # Numeric boolean for TFT
     df_events['days_to_next_dividend'] = 999
-    df_events['is_dividend_day'] = '0'          # String categorical for TFT
+    df_events['is_dividend_day'] = 0            # Numeric boolean for TFT
     
     if not events:
         print("No events data provided")
@@ -298,7 +298,7 @@ def add_events_features(df: pd.DataFrame, events: Dict[str, Dict[str, Any]],
                 
                 if earnings_in_window:
                     # Mark that there's an earnings event in the prediction window
-                    df_events.loc[idx, 'earnings_in_prediction_window'] = '1'
+                    df_events.loc[idx, 'earnings_in_prediction_window'] = 1
                     
                     # Calculate relative days to earnings within prediction window
                     # This tells the model "earnings will happen in X days from prediction start"
@@ -314,7 +314,7 @@ def add_events_features(df: pd.DataFrame, events: Dict[str, Dict[str, Any]],
                 
                 # 4. Is current day an earnings day - check for actual EPS data
                 if current_date.date() in [d.date() for d in earnings_dates]:
-                    df_events.loc[idx, 'is_earnings_day'] = '1'
+                    df_events.loc[idx, 'is_earnings_day'] = 1
                     
                     # Add actual EPS/revenue if available
                     if not eps_data.empty:
@@ -345,7 +345,7 @@ def add_events_features(df: pd.DataFrame, events: Dict[str, Dict[str, Any]],
                     df_events.loc[idx, 'days_to_next_split'] = min(days_to_next, 999)
                 
                 if current_date.date() in [d.date() for d in splits_dates]:
-                    df_events.loc[idx, 'is_split_day'] = '1'
+                    df_events.loc[idx, 'is_split_day'] = 1
         
         # Process dividends
         if 'dividends' in symbol_events and symbol_events['dividends']:
@@ -363,7 +363,7 @@ def add_events_features(df: pd.DataFrame, events: Dict[str, Dict[str, Any]],
                     df_events.loc[idx, 'days_to_next_dividend'] = min(days_to_next, 999)
                 
                 if current_date.date() in [d.date() for d in dividend_dates]:
-                    df_events.loc[idx, 'is_dividend_day'] = '1'
+                    df_events.loc[idx, 'is_dividend_day'] = 1
         
         # Update holidays
         if 'holidays' in symbol_events and symbol_events['holidays']:

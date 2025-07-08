@@ -32,7 +32,6 @@ warnings.filterwarnings('ignore')
 
 from baseline_tft import BaselineTFT, QuantileLoss, create_baseline_data
 
-
 class TFTDataset(Dataset):
     """Dataset for TFT training."""
     
@@ -45,7 +44,6 @@ class TFTDataset(Dataset):
     
     def __getitem__(self, idx):
         return {key: value[idx] for key, value in self.data.items()}
-
 
 def create_dataloaders(symbols: List[str], 
                       start_date: str, 
@@ -99,7 +97,6 @@ def create_dataloaders(symbols: List[str],
     print(f"   ✅ Validation batches: {len(val_loader)}")
     
     return train_loader, val_loader
-
 
 def create_dataloaders_with_options(symbols: List[str], 
                                    start_date: str, 
@@ -177,7 +174,6 @@ def create_dataloaders_with_options(symbols: List[str],
     }
     
     return train_loader, val_loader, feature_info
-
 
 def train_baseline_tft(symbols: List[str] = None,
                       start_date: str = '2020-01-01', 
@@ -418,7 +414,6 @@ def train_baseline_tft(symbols: List[str] = None,
     
     return model, train_losses, val_losses
 
-
 def create_training_plot(train_losses: List[float], val_losses: List[float]):
     """Create training progress plot."""
     plt.figure(figsize=(12, 8))
@@ -464,7 +459,6 @@ def create_training_plot(train_losses: List[float], val_losses: List[float]):
     plt.close()
     
     print("📊 Training plot saved as 'baseline_tft_training.png'")
-
 
 def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device: torch.device,
                             symbols: List[str] = None, start_date: str = '2020-01-01', 
@@ -686,7 +680,6 @@ Prediction Method: Walk-forward, No Future Peeking
     except Exception as e:
         print(f"⚠️  Trading simulation failed: {e}")
 
-
 def simulate_trading_strategy(predictions: np.ndarray, actuals: np.ndarray, 
                             initial_capital: float = 10000.0, 
                             buy_threshold: float = 0.001,
@@ -839,7 +832,6 @@ Strategy Alpha: {total_return - buy_hold_return:.2f}%
         'portfolio_values': portfolio_values
     }
 
-
 def create_sequential_batch(encoder_cont: torch.Tensor, 
                            decoder_cont: torch.Tensor,
                            static_cat: torch.Tensor,
@@ -852,7 +844,6 @@ def create_sequential_batch(encoder_cont: torch.Tensor,
         'static_real': static_real.unsqueeze(0)
     }
     return batch
-
 
 def update_sequence_with_prediction(encoder_cont: torch.Tensor,
                                    decoder_cont: torch.Tensor,
@@ -918,7 +909,6 @@ def update_sequence_with_prediction(encoder_cont: torch.Tensor,
     new_decoder_cont[0, 2] = min(current_time_idx + 0.001, 1.0)  # Small increment, capped at 1.0
     
     return new_encoder_cont, new_decoder_cont
-
 
 def sequential_prediction(model: BaselineTFT, 
                          initial_data: Dict[str, torch.Tensor],
@@ -994,7 +984,6 @@ def sequential_prediction(model: BaselineTFT,
     print(f"✅ Sequential prediction completed!")
     return np.array(predictions), attention_history
 
-
 def get_sequential_validation_data(val_loader: DataLoader, device: torch.device) -> Tuple[Dict, np.ndarray]:
     """
     Extract initial sequence and true future returns for sequential validation.
@@ -1024,8 +1013,6 @@ def get_sequential_validation_data(val_loader: DataLoader, device: torch.device)
     print(f"   True returns available: {len(true_returns)}")
     
     return initial_data, true_returns
-
-
 
 if __name__ == "__main__":
     print("🎯 Enhanced TFT Training Script with DataModule Pipeline")

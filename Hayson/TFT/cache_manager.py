@@ -13,7 +13,6 @@ import pandas as pd
 import warnings
 warnings.filterwarnings('ignore')
 
-
 class DataCache:
     """
     Unified data cache for all TFT data sources.
@@ -403,7 +402,6 @@ class DataCache:
                         break
         
         return cache_info
-
 
 # Global cache instance
 _cache_instance = None
