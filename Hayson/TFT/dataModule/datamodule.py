@@ -141,16 +141,17 @@ class TFTDataModule:
         Identify different types of feature columns according to proposed features table.
         
         Returns categorized features for TFT model:
-        - static_categoricals: sector, symbol (static categorical)
+        - static_categoricals: sector (static categorical) - REMOVED symbol to prevent model from knowing which stock it is
         - static_reals: market_cap (static real)  
         - time_varying_known_reals: calendar + economic + events (known future)
         - time_varying_unknown_reals: OHLCV + technical + news (past observed)
         """
         
         # Static categorical features (don't change over time)
+        # NOTE: Removed 'symbol' to prevent model from knowing which stock it is predicting
+        # This forces the model to learn from the actual features rather than memorizing stock-specific patterns
         static_categoricals = []
-        if 'symbol' in self.feature_df.columns:
-            static_categoricals.append('symbol')
+        # Do NOT add 'symbol' here - this would allow the model to cheat
         if 'sector' in self.feature_df.columns:
             static_categoricals.append('sector')
         
@@ -161,15 +162,10 @@ class TFTDataModule:
         
         # Time-varying known categoricals (future events)
         time_varying_known_categoricals = []
-        events_categorical = [
-            'is_earnings_day', 'is_split_day', 'is_dividend_day', 'is_holiday', 'is_weekend',
-            'earnings_in_prediction_window'  # NEW: binary flag for earnings in prediction window
-        ]
-        for col in events_categorical:
-            if col in self.feature_df.columns:
-                time_varying_known_categoricals.append(col)
+        # Note: Boolean event flags are now treated as numeric (0/1) rather than categorical
+        # This avoids issues with unseen categories during validation
         
-        # Time-varying known reals (calendar + economic + events timing)
+        # Time-varying known reals (calendar + economic + events timing + boolean flags)
         time_varying_known_reals = [
             'time_idx',  # Always required
         ]
@@ -190,6 +186,12 @@ class TFTDataModule:
             'days_since_earnings', 'days_to_earnings_in_window'  # NEW: prediction window timing
         ]
         
+        # Boolean event flags (known future) - now treated as numeric
+        events_boolean = [
+            'is_earnings_day', 'is_split_day', 'is_dividend_day', 'is_holiday', 'is_weekend',
+            'earnings_in_prediction_window'  # NEW: binary flag for earnings in prediction window
+        ]
+        
         # EPS and revenue features (known future from earnings calendar)
         eps_features = [
             'eps_estimate', 'eps_actual', 'revenue_estimate', 'revenue_actual'
@@ -201,7 +203,7 @@ class TFTDataModule:
         ]
         
         # Add all known future features that exist
-        all_known_features = calendar_features + economic_features + events_timing + eps_features
+        all_known_features = calendar_features + economic_features + events_timing + events_boolean + eps_features
         for col in all_known_features:
             if col in self.feature_df.columns:
                 time_varying_known_reals.append(col)
@@ -221,7 +223,7 @@ class TFTDataModule:
         print(f"  📊 Static categoricals ({len(static_categoricals)}): {static_categoricals}")
         print(f"  📈 Static reals ({len(static_reals)}): {static_reals}")
         print(f"  🔮 Known categoricals ({len(time_varying_known_categoricals)}): {time_varying_known_categoricals}")
-        print(f"  📅 Known reals ({len(time_varying_known_reals)}): calendar({len([c for c in calendar_features if c in self.feature_df.columns])}) + economic({len([c for c in economic_features if c in self.feature_df.columns])}) + events({len([c for c in events_timing if c in self.feature_df.columns])}) + eps({len([c for c in eps_features if c in self.feature_df.columns])})")
+        print(f"  📅 Known reals ({len(time_varying_known_reals)}): calendar({len([c for c in calendar_features if c in self.feature_df.columns])}) + economic({len([c for c in economic_features if c in self.feature_df.columns])}) + events({len([c for c in events_timing if c in self.feature_df.columns])}) + boolean({len([c for c in events_boolean if c in self.feature_df.columns])}) + eps({len([c for c in eps_features if c in self.feature_df.columns])})")
         print(f"  📉 Unknown reals ({len(time_varying_unknown_reals)}): OHLCV + technical + news")
         
         return static_categoricals, static_reals, time_varying_known_categoricals, time_varying_known_reals, time_varying_unknown_reals
