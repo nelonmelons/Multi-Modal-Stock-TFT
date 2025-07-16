@@ -10,7 +10,7 @@ Uses simple features and proper TFT data structure.
 # CONFIGURATION - Define stock symbols here
 # =============================================================================
 # Default stock symbols to use throughout the pipeline
-DEFAULT_SYMBOLS = ['NFLX']  # Primary symbol(s) for training - UPDATED
+DEFAULT_SYMBOLS = ['NVDA']  # Primary symbol(s) for training - UPDATED
 FALLBACK_SYMBOL = 'AAPL'   # Fallback symbol for evaluation functions
 
 # You can easily change to other symbols like:
@@ -23,6 +23,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import pandas as pd
+import random
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -514,13 +515,19 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
             # Get a reasonable number of samples for visualization
             viz_samples = min(len(predictions), len(targets))
             
-            # Use actual closing prices as starting points for reconstruction
-            if val_start_idx + viz_samples < len(close_prices):
-                starting_prices = close_prices[val_start_idx:val_start_idx + viz_samples]
+            # Proper sequential price reconstruction - no future peeking
+            if val_start_idx < len(close_prices):
+                # Use only ONE initial price - the start of validation period
+                initial_price = close_prices[val_start_idx]
                 
-                # Reconstruct sequential predictions (walk-forward, no future peeking)
-                pred_prices = starting_prices * (1 + predictions[:viz_samples])
-                actual_prices = starting_prices * (1 + targets[:viz_samples])
+                # Sequential reconstruction: each price depends only on previous price + return
+                pred_prices = np.zeros(viz_samples)
+                actual_prices = np.zeros(viz_samples) 
+                pred_prices[0] = actual_prices[0] = initial_price
+                
+                for i in range(1, viz_samples):
+                    pred_prices[i] = pred_prices[i-1] * (1 + predictions[i-1])
+                    actual_prices[i] = actual_prices[i-1] * (1 + targets[i-1])
                 
                 # Create price comparison plot
                 plt.figure(figsize=(15, 12))
@@ -534,16 +541,22 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
                         color='red', linewidth=2, alpha=0.8)
                 plt.xlabel('Time Steps')
                 plt.ylabel('Stock Price ($)')
-                plt.title(f'{symbol} Sequential Predictions vs Actual Prices')
+                plt.title(f'{symbol} True Sequential Predictions vs Actual Prices')
                 plt.legend()
                 plt.grid(True, alpha=0.3)
                 
-                # Calculate price-based metrics
+                # Calculate both sequential and cumulative metrics
                 price_mae = np.mean(np.abs(pred_prices - actual_prices))
                 price_rmse = np.sqrt(np.mean((pred_prices - actual_prices)**2))
                 price_mape = np.mean(np.abs((pred_prices - actual_prices) / actual_prices)) * 100
                 
-                plt.text(0.02, 0.98, f'Sequential Predictions:\nMAE: ${price_mae:.2f}\nRMSE: ${price_rmse:.2f}\nMAPE: {price_mape:.1f}%', 
+                # Cumulative error (final price difference)
+                final_pred_price = pred_prices[-1]
+                final_actual_price = actual_prices[-1]
+                cumulative_error = abs(final_pred_price - final_actual_price)
+                cumulative_error_pct = abs(final_pred_price - final_actual_price) / final_actual_price * 100
+                
+                plt.text(0.02, 0.98, f'True Sequential Predictions:\nMAE: ${price_mae:.2f}\nRMSE: ${price_rmse:.2f}\nMAPE: {price_mape:.1f}%\nFinal Error: ${cumulative_error:.2f} ({cumulative_error_pct:.1f}%)', 
                         transform=plt.gca().transAxes, verticalalignment='top',
                         bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
                 
@@ -553,7 +566,7 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
                 plt.hist(price_errors, bins=20, alpha=0.7, color='lightcoral', edgecolor='black')
                 plt.xlabel('Price Prediction Error ($)')
                 plt.ylabel('Frequency')
-                plt.title('Sequential Prediction Error Distribution')
+                plt.title('True Sequential Error Distribution')
                 plt.axvline(x=0, color='red', linestyle='--', alpha=0.8)
                 plt.grid(True, alpha=0.3)
                 
@@ -567,8 +580,9 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
                 plt.title('Price Prediction Percentage Error')
                 plt.grid(True, alpha=0.3)
                 
-                print(f"✅ Price reconstruction completed for {symbol}")
-                print(f"   Sequential Predictions - MAE: ${price_mae:.2f}, RMSE: ${price_rmse:.2f}, MAPE: {price_mape:.1f}%")
+                print(f"✅ True sequential price reconstruction completed for {symbol}")
+                print(f"   Sequential MAE: ${price_mae:.2f}, RMSE: ${price_rmse:.2f}, MAPE: {price_mape:.1f}%")
+                print(f"   Cumulative Error: ${cumulative_error:.2f} ({cumulative_error_pct:.1f}%) over {viz_samples} steps")
             else:
                 print("⚠️  Not enough validation data for price reconstruction")
                 plt.figure(figsize=(15, 12))
@@ -593,11 +607,13 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
     plt.title('Predictions vs Actuals (Returns)')
     plt.grid(True, alpha=0.3)
     
-    # Calculate R²
+    # Calculate Pearson correlation coefficient and R²
     correlation = np.corrcoef(targets, predictions)[0, 1]
     r_squared = correlation ** 2
-    plt.text(0.05, 0.95, f'R² = {r_squared:.3f}', transform=plt.gca().transAxes,
+    plt.text(0.05, 0.95, f'Pearson r = {correlation:.3f}', transform=plt.gca().transAxes,
              bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+    plt.text(0.05, 0.85, f'R² = {r_squared:.3f}', transform=plt.gca().transAxes,
+             bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8))
     
     # Residuals
     plt.subplot(3, 3, 5)
@@ -654,8 +670,8 @@ def analyze_model_performance(model: BaselineTFT, val_loader: DataLoader, device
 MAE: {mae:.4f}
 RMSE: {rmse:.4f}
 MAPE: {mape:.2f}%
+Pearson Correlation: {correlation:.3f}
 R²: {r_squared:.3f}
-Correlation: {correlation:.3f}
 Directional Accuracy: {directional_accuracy:.1f}%
 
 Data Points: {len(predictions)}
@@ -675,6 +691,7 @@ Prediction Method: Walk-forward, No Future Peeking
     print(f"📈 Sequential Prediction Performance Summary:")
     print(f"   MAE: {mae:.4f}")
     print(f"   RMSE: {rmse:.4f}")
+    print(f"   Pearson Correlation: {correlation:.3f}")
     print(f"   R²: {r_squared:.3f}")
     print(f"   Directional Accuracy: {directional_accuracy:.1f}%")
     print(f"   Sequential Steps: {len(predictions)}")
@@ -859,63 +876,56 @@ def update_sequence_with_prediction(encoder_cont: torch.Tensor,
                                    predicted_return: float,
                                    current_step: int) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Update the sequence by rolling forward one step and incorporating the prediction.
+    Update sequence for next prediction with proper normalized feature handling.
     
-    Note: encoder_cont has 8 features, decoder_cont has 3 features.
-    We need to properly construct the new encoder timestep from available information.
+    Note: All price features are percentage changes, not absolute values.
+    Encoder features: [open_norm, high_norm, low_norm, close_norm, volume_norm, returns_norm, sma_20_norm, rsi_14_norm]
     
     Args:
-        encoder_cont: Current encoder continuous features [seq_len, num_encoder_features]
-        decoder_cont: Current decoder continuous features [pred_len, num_decoder_features]
-        predicted_return: The predicted return value
-        current_step: Current prediction step for time indexing
+        encoder_cont: Current encoder features [seq_len, 8]
+        decoder_cont: Current decoder features [pred_len, 3] 
+        predicted_return: Predicted return value
+        current_step: Current prediction step
         
     Returns:
         Updated encoder_cont, decoder_cont for next prediction
     """
-    # Encoder features: ['open_norm', 'high_norm', 'low_norm', 'close_norm', 
-    #                   'volume_norm', 'returns_norm', 'sma_20_norm', 'rsi_14_norm']
-    # Decoder features: ['day_of_week_norm', 'month_norm', 'time_idx_norm']
-    
-    # Roll encoder sequence forward (remove first timestep)
+    # Roll encoder sequence forward (remove oldest timestep)
     new_encoder_cont = encoder_cont[1:].clone()  # [29, 8]
     
-    # Create new timestep for encoder by extending the last encoder timestep
-    # We'll use the last known values and update what we can predict
-    last_encoder_timestep = encoder_cont[-1].clone()  # [8]
+    # Create new timestep with proper feature consistency
+    new_timestep = torch.zeros(8, dtype=encoder_cont.dtype, device=encoder_cont.device)
     
-    # Update the return value (index 5 in encoder features)
-    last_encoder_timestep[5] = predicted_return  # returns_norm
+    # Feature indices: [0]open_norm [1]high_norm [2]low_norm [3]close_norm 
+    #                  [4]volume_norm [5]returns_norm [6]sma_20_norm [7]rsi_14_norm
     
-    # For OHLC features, we can simulate a simple price update based on the predicted return
-    # Assume close price changes by the predicted return, and OHLC follow simple patterns
-    if predicted_return != 0:
-        # Update close price (index 3) based on return
-        last_encoder_timestep[3] = torch.clamp(last_encoder_timestep[3] * (1 + predicted_return), 0, 1)
-        
-        # Update open (index 0) to be close to previous close
-        last_encoder_timestep[0] = last_encoder_timestep[3]
-        
-        # Update high (index 1) and low (index 2) with some simple logic
-        last_encoder_timestep[1] = max(last_encoder_timestep[0], last_encoder_timestep[3])  # high
-        last_encoder_timestep[2] = min(last_encoder_timestep[0], last_encoder_timestep[3])  # low
+    # 1. Set the predicted return directly
+    new_timestep[5] = predicted_return  # returns_norm
     
-    # For technical indicators (SMA, RSI), keep them similar to last timestep for simplicity
-    # In practice, you'd want to recalculate these based on new price data
+    # 2. For price percentage changes, set close_norm = predicted return
+    new_timestep[3] = predicted_return  # close_norm (% change)
+    new_timestep[0] = 0.0               # open_norm (no gap from previous close)
     
-    # Add the new timestep to encoder
-    new_encoder_cont = torch.cat([
-        new_encoder_cont,  # [29, 8]
-        last_encoder_timestep.unsqueeze(0)  # [1, 8]
-    ], dim=0)  # [30, 8]
+    # 3. Add realistic intraday variation for high/low percentage changes
+    base_volatility = abs(predicted_return) + 0.002  # Base intraday volatility
+    new_timestep[1] = predicted_return + random.uniform(0, base_volatility)  # high_norm
+    new_timestep[2] = predicted_return - random.uniform(0, base_volatility)  # low_norm
     
-    # Update decoder for next prediction
+    # 4. Volume - assume average (0 in normalized space)
+    new_timestep[4] = 0.0  # volume_norm
+    
+    # 5. Technical indicators - use previous values with small decay
+    prev_timestep = encoder_cont[-1]
+    new_timestep[6] = prev_timestep[6] * 0.99  # sma_20_norm (slowly decays)
+    new_timestep[7] = 0.5  # rsi_14_norm (neutral RSI = 50, normalized to 0.5)
+    
+    # Add new timestep to encoder
+    new_encoder_cont = torch.cat([new_encoder_cont, new_timestep.unsqueeze(0)], dim=0)  # [30, 8]
+    
+    # Update decoder time index
     new_decoder_cont = decoder_cont.clone()
-    
-    # Update time index in decoder (index 2)
-    # Increment by 1 day
     current_time_idx = decoder_cont[0, 2].item()
-    new_decoder_cont[0, 2] = min(current_time_idx + 0.001, 1.0)  # Small increment, capped at 1.0
+    new_decoder_cont[0, 2] = min(current_time_idx + 0.001, 1.0)  # Small increment
     
     return new_encoder_cont, new_decoder_cont
 

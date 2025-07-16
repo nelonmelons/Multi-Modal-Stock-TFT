@@ -20,7 +20,7 @@ Uses simple baseline features:
 # CONFIGURATION - Define default stock symbols
 # =============================================================================
 # Default stock symbols to use when none are specified
-DEFAULT_SYMBOLS = ['NFLX']  # Primary symbol(s) for data creation - UPDATED
+DEFAULT_SYMBOLS = ['NVDA']  # Primary symbol(s) for data creation - UPDATED
 # =============================================================================
 
 import os
