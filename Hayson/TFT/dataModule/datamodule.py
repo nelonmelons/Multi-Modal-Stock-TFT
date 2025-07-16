@@ -263,40 +263,63 @@ class TFTDataModule:
                 print(f"     {symbol}: {count} samples (need {min_required})")
     
     def _split_train_val(self):
-        """Split data into training and validation sets."""
-        # Sort by symbol and time
+        """Split data into training and validation sets with proper temporal separation."""
+        print("\n🔍 Splitting data into train/validation sets...")
+        
+        # Sort by symbol and time to ensure temporal ordering
         df_sorted = self.feature_df.sort_values(['symbol', 'time_idx']).reset_index(drop=True)
         
         # Calculate intelligent split based on data size and requirements
         max_time_idx = df_sorted['time_idx'].max()
+        min_time_idx = df_sorted['time_idx'].min()
         total_samples = len(df_sorted)
         
         # Ensure validation set has enough samples for the prediction length
         min_val_samples = max(3, self.predict_len + 1)
         min_train_samples = max(5, self.encoder_len + self.predict_len)
         
+        # Add buffer to prevent lookahead bias (temporal leakage)
+        lookahead_buffer = 3  # Time indices buffer between train and validation
+        
         # Calculate split ensuring both sets have minimum required samples
         if total_samples < min_train_samples + min_val_samples:
             print(f"⚠️  Very limited data: {total_samples} samples")
             # Use a smaller validation split for very small datasets
             val_samples = min(min_val_samples, total_samples // 3)
-            split_idx = max_time_idx - val_samples
+            split_idx = max_time_idx - val_samples - lookahead_buffer
         else:
-            # Normal split
-            split_idx = int(max_time_idx * (1 - self.val_split))
+            # Normal split with temporal buffer
+            val_time_range = int((max_time_idx - min_time_idx) * self.val_split)
+            split_idx = max_time_idx - val_time_range - lookahead_buffer
         
+        # Ensure split_idx is valid
+        if split_idx <= min_time_idx:
+            split_idx = min_time_idx + min_train_samples
+            print(f"⚠️  Adjusted split_idx to ensure minimum training data: {split_idx}")
+        
+        # Create train/validation splits with temporal separation
         train_df = df_sorted[df_sorted['time_idx'] <= split_idx].copy()
-        val_df = df_sorted[df_sorted['time_idx'] > split_idx].copy()
+        val_df = df_sorted[df_sorted['time_idx'] > split_idx + lookahead_buffer].copy()
         
-        print(f"Data split:")
+        # Validation checks
+        train_max_time = train_df['time_idx'].max() if len(train_df) > 0 else -1
+        val_min_time = val_df['time_idx'].min() if len(val_df) > 0 else float('inf')
+        actual_gap = val_min_time - train_max_time
+        
+        print(f"Data split with temporal separation:")
         print(f"  Training: {len(train_df)} samples (time_idx <= {split_idx})")
-        print(f"  Validation: {len(val_df)} samples (time_idx > {split_idx})")
+        print(f"  Buffer gap: {actual_gap} time indices")
+        print(f"  Validation: {len(val_df)} samples (time_idx > {split_idx + lookahead_buffer})")
         
         # Final validation
         if len(train_df) < min_train_samples:
             print(f"❌ Insufficient training data: {len(train_df)} < {min_train_samples}")
         if len(val_df) < 1:
             print(f"❌ No validation data available")
+        if actual_gap <= 0:
+            print(f"❌ No temporal separation! Gap: {actual_gap}")
+        else:
+            print(f"✅ Temporal separation confirmed: {actual_gap} time indices gap")
             
         return train_df, val_df
     

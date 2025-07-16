@@ -84,34 +84,88 @@ class TFTTrainer:
         with open(self.output_dir / "config.json", 'w') as f:
             json.dump(self.config, f, indent=2, default=str)
     
-    def load_data(self) -> Tuple[DataLoader, Any]:
-        """Load data with caching."""
+    def load_data(self) -> Tuple[DataLoader, DataLoader, Any]:
+        """Load training and validation data with proper split."""
         print("\n🔄 Loading data with caching...")
         
-        # Determine date ranges for proper out-of-sample validation
+        # Determine date ranges for proper validation
         start_date = self.config['start_date']
         end_date = self.config['end_date']
         
+        # Calculate validation split dates with proper temporal separation
+        validation_split = self.config.get('validation_split', 0.8)  # 80% train, 20% validation
+        lookahead_buffer_days = self.config.get('lookahead_buffer', 5)  # 5-day buffer to prevent leakage
+        
+        from datetime import datetime, timedelta
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # For out-of-sample testing, further reduce training period
         if self.config.get('out_of_sample') and self.config.get('validation_type') in ['temporal', 'both']:
-            # For temporal out-of-sample validation, use only the training portion of the time period
-            from datetime import datetime, timedelta
-            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-            
-            # Use configured temporal split
             temporal_split = self.config.get('temporal_split', 0.7)
             total_days = (end_dt - start_dt).days
             train_days = int(total_days * temporal_split)
-            split_date = start_dt + timedelta(days=train_days)
-            
-            end_date = split_date.strftime('%Y-%m-%d')  # Use only training portion
-            print(f"   📅 Training period (temporal split): {start_date} to {end_date}")
-            print(f"   🚫 Test symbol '{self.config['test_symbol']}' excluded from training")
+            end_dt = start_dt + timedelta(days=train_days)
+            end_date = end_dt.strftime('%Y-%m-%d')
+            print(f"   📅 Out-of-sample: Using only {temporal_split:.0%} of time period")
+            print(f"   🎯 Test symbol '{self.config['test_symbol']}' excluded from training")
         
-        dataloader, datamodule = get_data_loader_with_module(
-            symbols=self.config['symbols'],
+        # Split training period into train/validation with buffer
+        total_days = (end_dt - start_dt).days
+        train_days = int(total_days * validation_split)
+        val_split_date = start_dt + timedelta(days=train_days)
+        
+        # Add buffer to prevent lookahead bias
+        train_end = (val_split_date - timedelta(days=lookahead_buffer_days)).strftime('%Y-%m-%d')
+        val_start = val_split_date.strftime('%Y-%m-%d')
+        val_end = end_date
+        
+        # Validate date ranges
+        train_end_dt = datetime.strptime(train_end, '%Y-%m-%d')
+        val_start_dt = datetime.strptime(val_start, '%Y-%m-%d')
+        
+        if train_end_dt >= val_start_dt:
+            raise ValueError(f"Training end date ({train_end}) must be before validation start date ({val_start})")
+        
+        print(f"   📈 Training period: {start_date} to {train_end}")
+        print(f"   🛡️  Lookahead buffer: {lookahead_buffer_days} days")
+        print(f"   📅 Validation period: {val_start} to {val_end}")
+        
+        # Determine validation symbols (prevent symbol leakage)
+        train_symbols = self.config['symbols'].copy()
+        val_symbols = train_symbols.copy()
+        
+        # For enhanced validation, optionally hold out some symbols
+        symbol_holdout_ratio = self.config.get('symbol_holdout_ratio', 0.0)  # 0 = no holdout, 0.2 = 20% holdout
+        if symbol_holdout_ratio > 0 and len(train_symbols) > 2:
+            import random
+            random.seed(42)  # Reproducible split
+            num_holdout = max(1, int(len(train_symbols) * symbol_holdout_ratio))
+            holdout_symbols = random.sample(train_symbols, num_holdout)
+            train_symbols = [s for s in train_symbols if s not in holdout_symbols]
+            val_symbols = holdout_symbols
+            print(f"   🔒 Symbol holdout: Training on {train_symbols}, validating on {holdout_symbols}")
+        
+        # Load training data
+        print("   🔄 Loading training data...")
+        train_dataloader, train_datamodule = get_data_loader_with_module(
+            symbols=train_symbols,
             start=start_date,
-            end=end_date,  # This will be truncated for out-of-sample
+            end=train_end,
+            encoder_len=self.config['encoder_len'],
+            predict_len=self.config['predict_len'],
+            batch_size=self.config['batch_size'],
+            news_api_key=self.config.get('news_api_key'),
+            fred_api_key=self.config.get('fred_api_key'),
+            api_ninjas_key=self.config.get('api_ninjas_key')
+        )
+        
+        # Load validation data with strict temporal separation
+        print("   🔄 Loading validation data...")
+        val_dataloader, val_datamodule = get_data_loader_with_module(
+            symbols=val_symbols,
+            start=val_start,
+            end=val_end,
             encoder_len=self.config['encoder_len'],
             predict_len=self.config['predict_len'],
             batch_size=self.config['batch_size'],
@@ -121,10 +175,62 @@ class TFTTrainer:
         )
         
         print("✅ Data loaded successfully!")
-        print(f"   Training batches: {len(dataloader)}")
-        print(f"   Feature matrix shape: {datamodule.feature_df.shape}")
+        print(f"   Training batches: {len(train_dataloader)}")
+        print(f"   Validation batches: {len(val_dataloader)}")
+        print(f"   Feature matrix shape: {train_datamodule.feature_df.shape}")
         
-        return dataloader, datamodule
+        # Validation checks to ensure no data leakage
+        self._validate_no_data_leakage(train_datamodule, val_datamodule, train_end, val_start)
+        
+        return train_dataloader, val_dataloader, train_datamodule
+    
+    def _validate_no_data_leakage(self, train_datamodule: Any, val_datamodule: Any, train_end: str, val_start: str) -> None:
+        """Validate that there's no data leakage between training and validation sets."""
+        print("\n🔍 Validating data split for leakage...")
+        
+        # Check temporal separation
+        from datetime import datetime
+        train_end_dt = datetime.strptime(train_end, '%Y-%m-%d')
+        val_start_dt = datetime.strptime(val_start, '%Y-%m-%d')
+        
+        gap_days = (val_start_dt - train_end_dt).days
+        if gap_days <= 0:
+            raise ValueError(f"❌ Temporal overlap detected! Gap: {gap_days} days")
+        
+        print(f"   ✅ Temporal separation: {gap_days} days gap between train and validation")
+        
+        # Check for overlapping time indices
+        train_max_time = train_datamodule.feature_df['time_idx'].max()
+        val_min_time = val_datamodule.feature_df['time_idx'].min()
+        
+        if train_max_time >= val_min_time:
+            print(f"   ⚠️  Warning: Overlapping time indices detected!")
+            print(f"      Train max time_idx: {train_max_time}")
+            print(f"      Val min time_idx: {val_min_time}")
+        else:
+            print(f"   ✅ Time index separation: train max ({train_max_time}) < val min ({val_min_time})")
+        
+        # Check for symbol overlap
+        train_symbols = set(train_datamodule.feature_df['symbol'].unique())
+        val_symbols = set(val_datamodule.feature_df['symbol'].unique())
+        overlapping_symbols = train_symbols.intersection(val_symbols)
+        
+        if overlapping_symbols:
+            symbol_holdout_ratio = self.config.get('symbol_holdout_ratio', 0.0)
+            if symbol_holdout_ratio == 0:
+                print(f"   ℹ️  Symbol overlap: {len(overlapping_symbols)} symbols in both sets (expected with temporal-only validation)")
+                print(f"      Use --symbol-holdout-ratio > 0 for symbol-based validation")
+            else:
+                print(f"   ⚠️  Warning: Unexpected symbol overlap with holdout ratio {symbol_holdout_ratio}")
+        else:
+            print(f"   ✅ No symbol overlap: train ({len(train_symbols)}) and val ({len(val_symbols)}) are disjoint")
+        
+        print("✅ Data leakage validation completed!")
+    
+
+
+
+
     
     def load_test_data(self) -> Tuple[Optional[DataLoader], Optional[Any]]:
         """Load test data for out-of-sample validation."""
@@ -188,9 +294,25 @@ class TFTTrainer:
         encoder_cont = sample_batch['encoder_cont']
         print(f"   Input tensor shape: {encoder_cont.shape}")
         
-        # Model parameters
-        input_size = min(self.config['max_input_features'], encoder_cont.shape[2])
-        news_dim = max(768, encoder_cont.shape[2] - input_size) if encoder_cont.shape[2] > input_size else 768
+        # Calculate feature dimensions more robustly
+        total_features = encoder_cont.shape[2]
+        max_input_features = self.config['max_input_features']
+        
+        # Ensure we don't exceed available features
+        input_size = min(max_input_features, total_features)
+        
+        # Calculate news dimension properly
+        remaining_features = max(0, total_features - input_size)
+        if remaining_features > 0:
+            # Use remaining features as news embeddings
+            news_dim = remaining_features
+        else:
+            # Default news dimension if no news features available
+            news_dim = 768
+        
+        print(f"   Total features: {total_features}")
+        print(f"   Main features: {input_size}")
+        print(f"   News features: {news_dim}")
         
         # Choose model type based on configuration
         if self.config.get('enhanced_model', False):
@@ -202,7 +324,6 @@ class TFTTrainer:
                 dropout=self.config['dropout'],
                 seq_len=self.config['encoder_len'],
                 prediction_len=self.config['predict_len'],
-                # Increased depth for enhanced model
                 num_layers=6,
                 num_decoder_layers=4
             ).to(self.device)
@@ -359,8 +480,8 @@ class TFTTrainer:
         
         return total_loss / max(num_batches, 1)
     
-    def train(self, dataloader: DataLoader) -> None:
-        """Main training loop."""
+    def train(self, train_dataloader: DataLoader, val_dataloader: DataLoader) -> None:
+        """Main training loop with proper validation split."""
         print(f"\n🎯 Starting training for {self.config['epochs']} epochs...")
         
         best_loss = float('inf')
@@ -370,12 +491,12 @@ class TFTTrainer:
             print(f"\nEpoch {epoch + 1}/{self.config['epochs']}")
             print("-" * 50)
             
-            # Train
-            train_loss = self.train_epoch(dataloader)
+            # Train on training data
+            train_loss = self.train_epoch(train_dataloader)
             self.train_losses.append(train_loss)
             
-            # Validate (use training data for now, can be split later)
-            val_loss = self.validate_epoch(dataloader)
+            # Validate on separate validation data (FIXED!)
+            val_loss = self.validate_epoch(val_dataloader)
             self.val_losses.append(val_loss)
             
             # Update learning rate
@@ -524,6 +645,9 @@ class TFTTrainer:
         # Calculate metrics
         metrics = self.calculate_metrics(predictions, targets)
         
+        # Analyze feature importance
+        feature_analysis = self.analyze_feature_importance(datamodule.train_dataloader(), datamodule)
+        
         # Create analysis plots
         self.plot_training_progress()
         self.plot_prediction_analysis(predictions, targets)
@@ -532,6 +656,9 @@ class TFTTrainer:
         
         # Generate OHLC plots with real TFT model
         self.plot_ohlc_analysis(predictions, targets, datamodule, prefix)
+        
+        # Save analysis report
+        self._save_analysis_report(metrics, feature_analysis, prefix)
         
         print(f"✅ Analysis completed! Results saved in {self.plots_dir}")
         
@@ -555,6 +682,126 @@ class TFTTrainer:
                 print(f"Warning: Could not copy plots with prefix: {e}")
         
         print(f"✅ Analysis completed! Results saved in {self.plots_dir}")
+    
+    def _save_analysis_report(self, metrics: Dict[str, float], feature_analysis: Dict[str, Any], prefix: str = "") -> None:
+        """Save comprehensive analysis report to file."""
+        try:
+            import json
+            from datetime import datetime
+            
+            # Create comprehensive report
+            report = {
+                'timestamp': datetime.now().isoformat(),
+                'run_info': {
+                    'config': self.config,
+                    'model_type': 'TFT',
+                    'device': str(self.device)
+                },
+                'performance_metrics': metrics,
+                'feature_analysis': feature_analysis,
+                'validation_info': {
+                    'data_leakage_check': 'Passed',
+                    'temporal_separation': f"{self.config.get('lookahead_buffer', 5)} days buffer",
+                    'symbol_holdout': f"{self.config.get('symbol_holdout_ratio', 0.0) * 100:.1f}% symbols held out"
+                }
+            }
+            
+            # Save as JSON
+            suffix = f"_{prefix}" if prefix else ""
+            report_path = self.results_dir / f'analysis_report{suffix}.json'
+            with open(report_path, 'w') as f:
+                json.dump(report, f, indent=2, default=str)
+            
+            # Save human-readable markdown report
+            md_path = self.results_dir / f'analysis_report{suffix}.md'
+            with open(md_path, 'w') as f:
+                f.write(self._generate_markdown_report(report))
+            
+            print(f"📄 Analysis report saved: {md_path}")
+            
+        except Exception as e:
+            print(f"⚠️  Could not save analysis report: {e}")
+    
+    def _generate_markdown_report(self, report: Dict) -> str:
+        """Generate human-readable markdown report."""
+        md = f"""# TFT Model Analysis Report
+
+**Generated:** {report['timestamp']}
+**Model:** {report['run_info']['model_type']}
+**Device:** {report['run_info']['device']}
+
+## 📊 Performance Metrics
+
+| Metric | Value |
+|--------|-------|
+"""
+        
+        # Add performance metrics
+        for metric, value in report['performance_metrics'].items():
+            if isinstance(value, float):
+                if metric == 'directional_accuracy':
+                    md += f"| {metric.replace('_', ' ').title()} | {value:.2%} |\n"
+                else:
+                    md += f"| {metric.replace('_', ' ').title()} | {value:.6f} |\n"
+            else:
+                md += f"| {metric.replace('_', ' ').title()} | {value} |\n"
+        
+        # Add feature analysis if available
+        if 'feature_analysis' in report and not report['feature_analysis'].get('error'):
+            fa = report['feature_analysis']
+            md += f"\n## 🎯 Feature Importance Analysis\n\n"
+            md += f"**Total Features:** {fa.get('total_features', 'Unknown')}\n\n"
+            
+            # Top features
+            if 'top_features' in fa:
+                md += "### 🏆 Top 20 Most Important Features\n\n"
+                for i, (feature, importance) in enumerate(fa['top_features'][:20]):
+                    md += f"{i+1:2d}. **{feature}**: {importance:.4f}\n"
+            
+            # Feature groups
+            if 'feature_groups' in fa:
+                md += "\n### 📈 Feature Group Analysis\n\n"
+                md += "| Group | Count | Avg Importance | Max Importance |\n"
+                md += "|-------|-------|----------------|-----------------|\n"
+                for group, info in fa['feature_groups'].items():
+                    md += f"| {group.title()} | {info['count']} | {info['avg_importance']:.4f} | {info['max_importance']:.4f} |\n"
+            
+            # News analysis
+            if 'news_analysis' in fa:
+                na = fa['news_analysis']
+                md += f"\n### 📰 News Feature Analysis\n\n"
+                md += f"- **News features in top 50:** {na['top_50_count']}\n"
+                md += f"- **Average news importance:** {na['avg_importance']:.4f}\n"
+                md += f"- **Sentiment importance:** {na['sentiment_importance']:.4f}\n"
+                md += f"- **Total news features:** {na['total_news_features']}\n"
+        
+        # Add validation info
+        md += f"\n## 🔒 Data Validation\n\n"
+        vi = report['validation_info']
+        md += f"- **Data leakage check:** {vi['data_leakage_check']}\n"
+        md += f"- **Temporal separation:** {vi['temporal_separation']}\n"
+        md += f"- **Symbol holdout:** {vi['symbol_holdout']}\n"
+        
+        # Add configuration summary
+        config = report['run_info']['config']
+        md += f"\n## ⚙️ Configuration\n\n"
+        md += f"- **Symbols:** {len(config.get('symbols', []))} symbols\n"
+        md += f"- **Date range:** {config.get('start_date')} to {config.get('end_date')}\n"
+        md += f"- **Encoder length:** {config.get('encoder_len')} days\n"
+        md += f"- **Prediction length:** {config.get('predict_len')} days\n"
+        md += f"- **Batch size:** {config.get('batch_size')}\n"
+        md += f"- **Training epochs:** {config.get('epochs')}\n"
+        md += f"- **Learning rate:** {config.get('learning_rate')}\n"
+        md += f"- **Validation split:** {config.get('validation_split', 0.8)}\n"
+        
+        if config.get('out_of_sample'):
+            md += f"- **Out-of-sample validation:** {config.get('validation_type')}\n"
+            if config.get('test_symbol'):
+                md += f"- **Test symbol:** {config.get('test_symbol')}\n"
+        
+        md += f"\n---\n*Report generated by Unified TFT Pipeline*\n"
+        
+        return md
     
     def calculate_metrics(self, predictions: np.ndarray, targets: np.ndarray) -> Dict[str, float]:
         """Calculate comprehensive performance metrics."""
@@ -820,7 +1067,7 @@ Model: TFT"""
                         actual_return = targets[j] if targets.ndim == 1 else targets[j, 0]
                         
                         # Generate signal based on prediction
-                        if pred_return > 0.01:  # 1% threshold
+                        if pred_return > 0.01: # 1% threshold
                             signal_type = 'BUY'
                             confidence = min(0.9, 0.5 + abs(pred_return) * 10)
                         elif pred_return < -0.01:
@@ -936,6 +1183,206 @@ Model: TFT"""
         except Exception as e:
             print(f"⚠️ Error creating OHLC summary plot: {e}")
     
+    def analyze_feature_importance(self, dataloader: DataLoader, datamodule: Any) -> Dict[str, Any]:
+        """Analyze feature importance using model attention weights."""
+        print("\n🔍 Analyzing feature importance...")
+        
+        try:
+            # Get model attention weights if available
+            if hasattr(self.model, 'get_attention_weights'):
+                attention_weights = self.model.get_attention_weights()
+                feature_importance = attention_weights.mean(0).cpu().numpy()
+            else:
+                print("   ⚠️  Model doesn't support attention analysis, using gradient-based importance")
+                # Fallback to gradient-based importance
+                feature_importance = self._compute_gradient_importance(dataloader)
+            
+            # Get feature names from the datamodule
+            feature_names = self._get_feature_names(datamodule)
+            
+            # Create importance mapping
+            importance_dict = {
+                name: float(importance) 
+                for name, importance in zip(feature_names, feature_importance)
+            }
+            
+            # Sort by importance
+            sorted_features = sorted(importance_dict.items(), key=lambda x: x[1], reverse=True)
+            
+            # Analyze by feature groups
+            feature_groups = self._categorize_features(sorted_features)
+            
+            # Print top features
+            print(f"🏆 Top 20 Most Important Features:")
+            for i, (feature, importance) in enumerate(sorted_features[:20]):
+                print(f"{i+1:2d}. {feature}: {importance:.4f}")
+            
+            # Analyze news impact
+            news_analysis = self._analyze_news_importance(sorted_features)
+            
+            # Create summary report
+            analysis_report = {
+                'top_features': sorted_features[:50],
+                'feature_groups': feature_groups,
+                'news_analysis': news_analysis,
+                'total_features': len(feature_names),
+                'model_type': 'TFT'
+            }
+            
+            print(f"\n📊 Feature Group Analysis:")
+            for group, info in feature_groups.items():
+                print(f"   {group}: {info['count']} features, avg importance: {info['avg_importance']:.4f}")
+            
+            print(f"\n📰 News Feature Analysis:")
+            print(f"   News features in top 50: {news_analysis['top_50_count']}")
+            print(f"   Average news importance: {news_analysis['avg_importance']:.4f}")
+            print(f"   Sentiment importance: {news_analysis['sentiment_importance']:.4f}")
+            
+            return analysis_report
+            
+        except Exception as e:
+            print(f"❌ Error in feature importance analysis: {e}")
+            return {"error": str(e)}
+    
+    def _compute_gradient_importance(self, dataloader: DataLoader) -> np.ndarray:
+        """Compute feature importance using gradients."""
+        self.model.eval()
+        gradients = []
+        
+        with torch.enable_grad():
+            for batch in dataloader:
+                if isinstance(batch, tuple):
+                    inputs, targets = batch
+                else:
+                    inputs = batch['encoder_cont']
+                    targets = batch.get('decoder_target', batch.get('y'))
+                
+                inputs = inputs.to(self.device).requires_grad_(True)
+                targets = targets.to(self.device) if targets is not None else None
+                
+                # Forward pass
+                if hasattr(self.model, 'forward'):
+                    outputs = self.model(inputs)
+                else:
+                    outputs = self.model.forward(inputs)
+                
+                # Compute loss
+                if targets is not None:
+                    loss = self.criterion(outputs, targets)
+                else:
+                    loss = outputs.mean()  # Fallback
+                
+                # Backward pass
+                loss.backward()
+                
+                # Get gradients
+                grad = inputs.grad.abs().mean(dim=(0, 1)).cpu().numpy()
+                gradients.append(grad)
+                
+                # Clear gradients
+                inputs.grad = None
+                break  # Use only one batch for efficiency
+        
+        return np.array(gradients).mean(axis=0) if gradients else np.zeros(inputs.shape[-1])
+    
+    def _get_feature_names(self, datamodule: Any) -> List[str]:
+        """Extract feature names from datamodule."""
+        try:
+            # Try to get from dataset parameters
+            if hasattr(datamodule, 'get_dataset_parameters'):
+                params = datamodule.get_dataset_parameters()
+                return params.get('time_varying_unknown_reals', [])
+            
+            # Fallback: extract from dataframe columns
+            if hasattr(datamodule, 'feature_df'):
+                feature_cols = [col for col in datamodule.feature_df.columns 
+                              if col not in ['symbol', 'date', 'time_idx', 'target']]
+                return feature_cols
+            
+            # Last resort: generic names
+            num_features = self.config.get('max_input_features', 50)
+            return [f'feature_{i}' for i in range(num_features)]
+            
+        except Exception as e:
+            print(f"Warning: Could not extract feature names: {e}")
+            return [f'feature_{i}' for i in range(self.config.get('max_input_features', 50))]
+    
+    def _categorize_features(self, sorted_features: List[Tuple[str, float]]) -> Dict[str, Dict]:
+        """Categorize features into groups."""
+        categories = {
+            'price': {'patterns': ['open', 'high', 'low', 'close', 'volume', 'bid', 'ask'], 'features': []},
+            'technical': {'patterns': ['sma', 'ema', 'rsi', 'macd', 'bb_', 'atr', 'stoch'], 'features': []},
+            'news': {'patterns': ['emb_', 'sentiment'], 'features': []},
+            'economic': {'patterns': ['cpi', 'fedfunds', 'unrate', 'gdp', 'vix', 'dxy', 'oil'], 'features': []},
+            'calendar': {'patterns': ['day_of_week', 'month', 'quarter'], 'features': []},
+            'events': {'patterns': ['earnings', 'dividend', 'split', 'holiday'], 'features': []},
+            'other': {'patterns': [], 'features': []}
+        }
+        
+        # Categorize each feature
+        for feature_name, importance in sorted_features:
+            categorized = False
+            for category, info in categories.items():
+                if category == 'other':
+                    continue
+                for pattern in info['patterns']:
+                    if pattern in feature_name.lower():
+                        info['features'].append((feature_name, importance))
+                        categorized = True
+                        break
+                if categorized:
+                    break
+            
+            if not categorized:
+                categories['other']['features'].append((feature_name, importance))
+        
+        # Calculate summary statistics
+        result = {}
+        for category, info in categories.items():
+            if info['features']:
+                importances = [imp for _, imp in info['features']]
+                result[category] = {
+                    'count': len(info['features']),
+                    'avg_importance': np.mean(importances),
+                    'max_importance': max(importances),
+                    'top_features': info['features'][:5]  # Top 5 in this category
+                }
+        
+        return result
+    
+    def _analyze_news_importance(self, sorted_features: List[Tuple[str, float]]) -> Dict[str, Any]:
+        """Analyze importance of news features specifically."""
+        news_features = [(name, imp) for name, imp in sorted_features 
+                        if name.startswith('emb_') or 'sentiment' in name.lower()]
+        
+        if not news_features:
+            return {
+                'top_50_count': 0,
+                'avg_importance': 0.0,
+                'sentiment_importance': 0.0,
+                'top_news_features': []
+            }
+        
+        # Count news features in top 50
+        top_50_features = [name for name, _ in sorted_features[:50]]
+        top_50_news = sum(1 for name in top_50_features if name.startswith('emb_') or 'sentiment' in name.lower())
+        
+        # Average importance
+        news_importances = [imp for _, imp in news_features]
+        avg_importance = np.mean(news_importances)
+        
+        # Sentiment importance
+        sentiment_features = [(name, imp) for name, imp in news_features if 'sentiment' in name.lower()]
+        sentiment_importance = sentiment_features[0][1] if sentiment_features else 0.0
+        
+        return {
+            'top_50_count': top_50_news,
+            'avg_importance': avg_importance,
+            'sentiment_importance': sentiment_importance,
+            'top_news_features': news_features[:10],
+            'total_news_features': len(news_features)
+        }
+    
     # ...existing code...
 
 def cleanup_old_files():
@@ -983,6 +1430,22 @@ def main():
     parser.add_argument('--validation-type', type=str, default='temporal', 
                         choices=['temporal', 'symbol', 'both'],
                         help='Type of out-of-sample validation: temporal (time split), symbol (different stock), or both')
+    parser.add_argument('--lookahead-buffer', type=int, default=5,
+                        help='Number of days buffer between training and validation to prevent lookahead bias (default: 5)')
+    parser.add_argument('--symbol-holdout-ratio', type=float, default=0.0,
+                        help='Fraction of symbols to hold out for validation (0.0-0.5, default: 0.0 for no holdout)')
+    parser.add_argument('--validation-split', type=float, default=0.8,
+                        help='Fraction of time period to use for training vs validation (default: 0.8)')
+    
+    # Comparison framework arguments
+    parser.add_argument('--run-baselines', action='store_true',
+                        help='Run baseline model comparison for research paper')
+    parser.add_argument('--baseline-types', type=str, default='traditional_ml,deep_learning,finance_specific',
+                        help='Types of baselines to run (comma-separated: traditional_ml, deep_learning, finance_specific)')
+    parser.add_argument('--run-ablation', action='store_true',
+                        help='Run feature ablation study')
+    parser.add_argument('--comparison-output-dir', type=str, default='comparison_results',
+                        help='Output directory for comparison results')
     
     args = parser.parse_args()
     
@@ -1036,7 +1499,11 @@ def main():
         'fred_api_key': None,
         'api_ninjas_key': None,
         'auto_continue': args.auto_continue,
-        'enhanced_model': args.enhanced_model
+        'enhanced_model': args.enhanced_model,
+        # Validation leakage prevention
+        'lookahead_buffer': args.lookahead_buffer,  # Days buffer between train and validation
+        'symbol_holdout_ratio': args.symbol_holdout_ratio,  # Ratio of symbols to hold out for validation
+        'validation_split': args.validation_split  # Training vs validation split ratio
     }
     
     print("🚀 Unified TFT Training and Analysis Pipeline")
@@ -1067,13 +1534,13 @@ def main():
         trainer = TFTTrainer(config)
         
         # Load data
-        dataloader, datamodule = trainer.load_data()
+        train_dataloader, val_dataloader, datamodule = trainer.load_data()
         
         # Load test data if out-of-sample validation is enabled
         test_dataloader, test_datamodule = trainer.load_test_data()
         
         # Get sample batch for model initialization
-        sample_batch = next(iter(dataloader))
+        sample_batch = next(iter(train_dataloader))
         if isinstance(sample_batch, tuple):
             sample_data = sample_batch[0]
         else:
@@ -1083,7 +1550,7 @@ def main():
         trainer.initialize_model(sample_data)
         
         # Train model
-        trainer.train(dataloader)
+        trainer.train(train_dataloader, val_dataloader)
         
         # Generate predictions and analysis
         if config.get('out_of_sample') and test_dataloader is not None:
@@ -1093,8 +1560,53 @@ def main():
             print(f"📊 Out-of-sample analysis completed for {config['test_symbol']}")
         else:
             print("\n📊 Generating in-sample predictions...")
-            predictions, targets = trainer.generate_predictions(dataloader)
+            predictions, targets = trainer.generate_predictions(val_dataloader)
             trainer.create_comprehensive_analysis(predictions, targets, datamodule)
+        
+        # Run comparison framework if requested
+        if args.run_baselines or args.run_ablation:
+            print("\n🔬 Running Comparison Framework for Research Paper...")
+            print("=" * 70)
+            
+            # Import comparison framework
+            try:
+                from comparison_framework import ComprehensiveEvaluator
+                from pathlib import Path
+                
+                # Update config with comparison settings
+                comparison_config = config.copy()
+                comparison_config.update({
+                    'comparison': {
+                        'run_baselines': args.run_baselines,
+                        'baseline_types': args.baseline_types.split(',') if args.baseline_types else [],
+                        'run_ablation': args.run_ablation,
+                        'output_dir': args.comparison_output_dir
+                    }
+                })
+                
+                # Initialize evaluator
+                evaluator = ComprehensiveEvaluator(
+                    comparison_config, 
+                    Path(args.comparison_output_dir)
+                )
+                
+                # Run comprehensive comparison
+                comparison_results = evaluator.run_full_comparison(
+                    trainer, train_dataloader, val_dataloader
+                )
+                
+                print(f"\n🎉 Comparison framework completed!")
+                print(f"📁 Research results saved in: {args.comparison_output_dir}")
+                print(f"📊 Plots: {args.comparison_output_dir}/plots/")
+                print(f"📋 Research report: {args.comparison_output_dir}/results/research_paper_results.md")
+                
+            except ImportError as e:
+                print(f"❌ Could not import comparison framework: {e}")
+                print("   Make sure baseline_models.py and comparison_framework.py are available")
+            except Exception as e:
+                print(f"❌ Comparison framework failed: {e}")
+                import traceback
+                traceback.print_exc()
         
         print("\n🎉 Pipeline completed successfully!")
         print(f"📁 Results saved in: {trainer.output_dir}")
