@@ -75,34 +75,33 @@ def build_features(stock_df: pd.DataFrame,
                    ta_df: pd.DataFrame,
                    fred_df: pd.DataFrame,
                    encoder_len: int,
-                   predict_len: int) -> pd.DataFrame:
+                   predict_len: int,
+                   split_date: str = None,
+                   is_training: bool = True) -> pd.DataFrame:
     """
-    Merge all inputs and create TFT-ready feature matrix.
+    Merge all inputs and create TFT-ready feature matrix with TEMPORAL LEAKAGE PREVENTION.
     
     Args:
         stock_df: Stock data with OHLCV
         events: Events data dictionary
         news_df: News embeddings DataFrame
-        ta_df: Technical indicators DataFrame
+        ta_df: Technical indicators DataFrame (computed with proper temporal constraints)
         fred_df: FRED economic data DataFrame
         encoder_len: Encoder sequence length
         predict_len: Prediction sequence length
+        split_date: Date for train/validation split (ISO format 'YYYY-MM-DD')
+        is_training: Whether this is for training data (affects how features are processed)
         
     Returns:
-        DataFrame with:
-        - time_idx: Sequential time index per symbol group
-        - Static features: sector, market_cap, symbol ID
-        - Known-future features: day_of_week, is_holiday, days_to_next_earnings, economic indicators
-        - Past inputs: OHLCV, TA columns, news embeddings
-        - Target: next-day return or price change
+        DataFrame with proper temporal constraints and no data leakage
     """
-    print("Building TFT-ready feature matrix...")
+    print(f"Building TFT-ready feature matrix (temporal-safe, is_training={is_training})...")
     
     if stock_df.empty:
         print("Warning: Empty stock DataFrame provided")
         return pd.DataFrame()
     
-    # Start with technical indicators DataFrame (most complete)
+    # Start with technical indicators DataFrame (should already be temporal-safe)
     if not ta_df.empty:
         df = ta_df.copy()
         print(f"Starting with TA DataFrame: {df.shape}")
@@ -116,27 +115,27 @@ def build_features(stock_df: pd.DataFrame,
     # Sort by symbol and date
     df = df.sort_values(['symbol', 'date']).reset_index(drop=True)
     
-    # Add time index per symbol group
-    df = add_time_index(df)
+    # Add time index per symbol group with GLOBAL temporal awareness
+    df = add_global_time_index(df)
     
     # Add calendar features
     df = add_calendar_features(df)
     
-    # Add events-based features
-    df = add_events_features(df, events, predict_len)
+    # Add events-based features with temporal constraints
+    df = add_events_features_temporal_safe(df, events, predict_len, split_date, is_training)
     
-    # Merge news embeddings
+    # Merge news embeddings with temporal awareness
     if not news_df.empty:
-        df = merge_news_features(df, news_df)
+        df = merge_news_features_temporal_safe(df, news_df, split_date, is_training)
         print(f"After news merge: {df.shape}")
     
-    # Merge FRED economic data
+    # Merge FRED economic data with temporal constraints
     if not fred_df.empty:
-        df = merge_fred_features(df, fred_df)
+        df = merge_fred_features_temporal_safe(df, fred_df, split_date, is_training)
         print(f"After FRED merge: {df.shape}")
     
-    # Add target variable (next-day return)
-    df = add_target_variable(df)
+    # Add target variable (next-day return) with proper temporal alignment
+    df = add_target_variable_temporal_safe(df, split_date, is_training)
     
     # Add static categorical and numerical features
     df = add_static_features(df, events)
@@ -152,39 +151,46 @@ def build_features(stock_df: pd.DataFrame,
         print("   • Different symbols")
         raise ValueError("Insufficient data after filtering for minimum sequence length")
     
-    # Forward fill missing values
-    df = handle_missing_values(df)
+    # Handle missing values with temporal constraints
+    df = handle_missing_values_temporal_safe(df, split_date, is_training)
     
     # Final cleanup and validation
-    df = final_cleanup(df)
+    df = final_cleanup_temporal_safe(df, split_date, is_training)
     
     print(f"Final feature matrix shape: {df.shape}")
     print(f"Columns: {len(df.columns)}")
     print(f"Symbols: {df['symbol'].nunique()}")
     print(f"Date range: {df['date'].min()} to {df['date'].max()}")
     
+    if split_date:
+        split_dt = pd.to_datetime(split_date)
+        train_count = (df['date'] <= split_dt).sum()
+        val_count = (df['date'] > split_dt).sum()
+        print(f"Split awareness: {train_count} training, {val_count} validation samples")
+    
     return df
 
 
-def add_time_index(df: pd.DataFrame) -> pd.DataFrame:
-    """Add sequential time index per symbol group."""
+def add_global_time_index(df: pd.DataFrame) -> pd.DataFrame:
+    """Add GLOBAL sequential time index that preserves temporal relationships across symbols."""
     df_with_time = df.copy()
     
-    # Create time index for each symbol separately
-    time_idx_data = []
+    # FIXED: Create global time index that maintains temporal relationships
+    # Sort by date first to get global temporal order
+    df_with_time = df_with_time.sort_values(['date', 'symbol']).reset_index(drop=True)
     
-    for symbol in df['symbol'].unique():
-        symbol_df = df[df['symbol'] == symbol].copy()
-        symbol_df = symbol_df.sort_values('date')
-        
-        # Create sequential time index starting from 0
-        symbol_df['time_idx'] = range(len(symbol_df))
-        time_idx_data.append(symbol_df)
+    # Create global time mapping
+    unique_dates = sorted(df_with_time['date'].unique())
+    date_to_time_idx = {date: idx for idx, date in enumerate(unique_dates)}
     
-    df_with_time = pd.concat(time_idx_data, ignore_index=True)
+    # Assign time indices based on global date ordering
+    df_with_time['time_idx'] = df_with_time['date'].map(date_to_time_idx)
+    
+    # Sort back to symbol-date order for consistency
     df_with_time = df_with_time.sort_values(['symbol', 'date']).reset_index(drop=True)
     
-    print(f"Added time_idx: {df_with_time['time_idx'].min()} to {df_with_time['time_idx'].max()}")
+    print(f"Added GLOBAL time_idx: {df_with_time['time_idx'].min()} to {df_with_time['time_idx'].max()}")
+    print(f"Global temporal span: {len(unique_dates)} unique dates")
     return df_with_time
 
 
@@ -375,6 +381,120 @@ def add_events_features(df: pd.DataFrame, events: Dict[str, Dict[str, Any]],
     return df_events
 
 
+def add_events_features_temporal_safe(df: pd.DataFrame, events: Dict[str, Dict[str, Any]], 
+                                     predict_len: int, split_date: str = None, 
+                                     is_training: bool = True) -> pd.DataFrame:
+    """
+    Add events-based features with TEMPORAL CONSTRAINTS to prevent data leakage.
+    
+    CRITICAL FIXES:
+    - For training data: Only use earnings announced BEFORE current date
+    - For validation data: Only use earnings announced BEFORE split date during training
+    - Prevent lookahead bias in earnings calendar information
+    """
+    df_events = df.copy()
+    
+    # Initialize events columns with relative timing approach
+    df_events['days_to_next_earnings'] = 999
+    df_events['days_since_earnings'] = 999
+    df_events['is_earnings_day'] = 0
+    df_events['earnings_in_prediction_window'] = 0
+    df_events['days_to_earnings_in_window'] = 999
+    df_events['eps_estimate'] = 0.0
+    df_events['eps_actual'] = 0.0
+    df_events['revenue_estimate'] = 0.0
+    df_events['revenue_actual'] = 0.0
+    df_events['days_to_next_split'] = 999
+    df_events['is_split_day'] = 0
+    df_events['days_to_next_dividend'] = 999
+    df_events['is_dividend_day'] = 0
+    
+    if not events:
+        print("No events data provided")
+        return df_events
+    
+    # Determine temporal cutoff for data leakage prevention
+    temporal_cutoff = None
+    if split_date and is_training:
+        temporal_cutoff = pd.to_datetime(split_date)
+        print(f"TEMPORAL CONSTRAINT: Using earnings calendar only up to {temporal_cutoff}")
+    
+    for symbol in df_events['symbol'].unique():
+        if symbol not in events:
+            continue
+        
+        symbol_mask = df_events['symbol'] == symbol
+        symbol_events = events[symbol]
+        
+        # Process earnings events with TEMPORAL CONSTRAINTS
+        if 'earnings' in symbol_events and symbol_events['earnings']:
+            all_earnings_dates = [pd.to_datetime(date) for date in symbol_events['earnings']]
+            
+            # CRITICAL FIX: Filter earnings calendar based on temporal constraints
+            if temporal_cutoff:
+                # For training data: only use earnings that were known by split date
+                # This prevents using future earnings calendar information
+                earnings_dates = [d for d in all_earnings_dates if d <= temporal_cutoff]
+                print(f"Symbol {symbol}: Filtered earnings from {len(all_earnings_dates)} to {len(earnings_dates)} entries (cutoff: {temporal_cutoff})")
+            else:
+                # For prediction/validation: use all available earnings (assuming real-world scenario)
+                earnings_dates = all_earnings_dates
+            
+            eps_data = symbol_events.get('eps_data', pd.DataFrame())
+            
+            for idx, row in df_events[symbol_mask].iterrows():
+                current_date = pd.to_datetime(row['date'])
+                if current_date.tz is not None:
+                    current_date = current_date.tz_localize(None)
+                
+                # TEMPORAL CONSTRAINT: Only use earnings announced/scheduled BEFORE current date
+                # This prevents using earnings announcements that weren't available at prediction time
+                available_earnings = [d for d in earnings_dates if d < current_date + pd.Timedelta(days=1)]
+                
+                # Define prediction window: [current_date + 1, current_date + predict_len]
+                prediction_start = current_date + pd.Timedelta(days=1)
+                prediction_end = current_date + pd.Timedelta(days=predict_len)
+                
+                # 1. Days to next earnings (from available earnings only)
+                future_earnings = [d for d in available_earnings if d > current_date]
+                if future_earnings:
+                    days_to_next = (min(future_earnings) - current_date).days
+                    df_events.loc[idx, 'days_to_next_earnings'] = min(days_to_next, 999)
+                    
+                    # Add EPS estimate for next earnings (temporal-safe)
+                    next_earnings_date = min(future_earnings)
+                    if not eps_data.empty:
+                        next_eps_row = eps_data[eps_data['date'].dt.date == next_earnings_date.date()]
+                        if not next_eps_row.empty:
+                            if 'epsEstimated' in next_eps_row.columns:
+                                eps_est = next_eps_row['epsEstimated'].iloc[0]
+                                if pd.notna(eps_est):
+                                    df_events.loc[idx, 'eps_estimate'] = float(eps_est)
+                            if 'revenueEstimated' in next_eps_row.columns:
+                                rev_est = next_eps_row['revenueEstimated'].iloc[0]
+                                if pd.notna(rev_est):
+                                    df_events.loc[idx, 'revenue_estimate'] = float(rev_est)
+                
+                # 2. Earnings in prediction window (temporal-safe)
+                earnings_in_window = [d for d in available_earnings 
+                                    if prediction_start <= d <= prediction_end]
+                
+                if earnings_in_window:
+                    df_events.loc[idx, 'earnings_in_prediction_window'] = 1
+                    closest_earnings = min(earnings_in_window)
+                    days_to_earnings_in_window = (closest_earnings - prediction_start).days + 1
+                    df_events.loc[idx, 'days_to_earnings_in_window'] = days_to_earnings_in_window
+                
+                # 3. Days since last earnings (temporal-safe)
+                past_earnings = [d for d in available_earnings if d <= current_date]
+                if past_earnings:
+                    days_since = (current_date - max(past_earnings)).days
+                    df_events.loc[idx, 'days_since_earnings'] = min(days_since, 999)
+    
+    print("Added events features with TEMPORAL CONSTRAINTS")
+    return df_events
+
+
 def merge_news_features(df: pd.DataFrame, news_df: pd.DataFrame) -> pd.DataFrame:
     """Merge news embeddings with main DataFrame."""
     if news_df.empty:
@@ -402,6 +522,47 @@ def merge_news_features(df: pd.DataFrame, news_df: pd.DataFrame) -> pd.DataFrame
     )
     
     # Fill missing news embeddings with zeros
+    news_cols = [col for col in news_copy.columns if col.startswith('emb_') or col == 'sentiment_score']
+    for col in news_cols:
+        if col in merged_df.columns:
+            merged_df[col] = merged_df[col].fillna(0)
+    
+    return merged_df
+
+
+def merge_news_features_temporal_safe(df: pd.DataFrame, news_df: pd.DataFrame, 
+                                     split_date: str = None, is_training: bool = True) -> pd.DataFrame:
+    """Merge news embeddings with TEMPORAL CONSTRAINTS to prevent data leakage."""
+    if news_df.empty:
+        return df
+    
+    df_copy = df.copy()
+    news_copy = news_df.copy()
+    
+    # Convert to datetime and normalize timezones
+    df_copy['date'] = pd.to_datetime(df_copy['date'])
+    news_copy['date'] = pd.to_datetime(news_copy['date'])
+    
+    if df_copy['date'].dt.tz is not None:
+        df_copy['date'] = df_copy['date'].dt.tz_localize(None)
+    if news_copy['date'].dt.tz is not None:
+        news_copy['date'] = news_copy['date'].dt.tz_localize(None)
+    
+    # TEMPORAL CONSTRAINT: Filter news data based on split date to prevent leakage
+    if split_date and is_training:
+        temporal_cutoff = pd.to_datetime(split_date)
+        # For training: only use news from before split date
+        news_copy = news_copy[news_copy['date'] <= temporal_cutoff].copy()
+        print(f"TEMPORAL CONSTRAINT: Filtered news data up to {temporal_cutoff}")
+    
+    # Merge on symbol and date
+    merged_df = pd.merge(
+        df_copy, news_copy,
+        on=['symbol', 'date'],
+        how='left'
+    )
+    
+    # Fill missing news embeddings with zeros (temporal-safe)
     news_cols = [col for col in news_copy.columns if col.startswith('emb_') or col == 'sentiment_score']
     for col in news_cols:
         if col in merged_df.columns:
@@ -446,6 +607,65 @@ def merge_fred_features(df: pd.DataFrame, fred_df: pd.DataFrame) -> pd.DataFrame
     return merged_df
 
 
+def merge_fred_features_temporal_safe(df: pd.DataFrame, fred_df: pd.DataFrame, 
+                                     split_date: str = None, is_training: bool = True) -> pd.DataFrame:
+    """Merge FRED economic data with TEMPORAL CONSTRAINTS to prevent data leakage."""
+    if fred_df.empty:
+        return df
+    
+    df_copy = df.copy()
+    fred_copy = fred_df.copy()
+    
+    # Convert to datetime and normalize timezones
+    df_copy['date'] = pd.to_datetime(df_copy['date'])
+    fred_copy['date'] = pd.to_datetime(fred_copy['date'])
+    
+    if df_copy['date'].dt.tz is not None:
+        df_copy['date'] = df_copy['date'].dt.tz_localize(None)
+    if fred_copy['date'].dt.tz is not None:
+        fred_copy['date'] = fred_copy['date'].dt.tz_localize(None)
+    
+    # TEMPORAL CONSTRAINT: Filter FRED data to prevent leakage
+    if split_date and is_training:
+        temporal_cutoff = pd.to_datetime(split_date)
+        # For training: only use economic data available before split date
+        fred_copy = fred_copy[fred_copy['date'] <= temporal_cutoff].copy()
+        print(f"TEMPORAL CONSTRAINT: Filtered FRED data up to {temporal_cutoff}")
+    
+    # Merge on date (economic data is same for all symbols on each date)
+    merged_df = pd.merge(
+        df_copy, fred_copy,
+        on='date',
+        how='left'
+    )
+    
+    # TEMPORAL-SAFE forward fill: Only fill within temporal constraints
+    from .fetch_fred import get_economic_features
+    econ_cols = get_economic_features()
+    
+    if split_date and is_training:
+        # For training data: separate filling for train vs validation periods
+        split_dt = pd.to_datetime(split_date)
+        train_mask = merged_df['date'] <= split_dt
+        val_mask = merged_df['date'] > split_dt
+        
+        # Fill training period normally
+        for col in econ_cols:
+            if col in merged_df.columns:
+                merged_df.loc[train_mask, col] = merged_df.loc[train_mask, col].ffill().fillna(0)
+                
+                # For validation period: use last known value from training period
+                last_train_value = merged_df.loc[train_mask, col].iloc[-1] if train_mask.any() else 0
+                merged_df.loc[val_mask, col] = merged_df.loc[val_mask, col].fillna(last_train_value)
+    else:
+        # For prediction: use standard forward fill
+        for col in econ_cols:
+            if col in merged_df.columns:
+                merged_df[col] = merged_df[col].ffill().fillna(0)
+    
+    return merged_df
+
+
 def add_target_variable(df: pd.DataFrame) -> pd.DataFrame:
     """Add target variable (next-day return)."""
     df_target = df.copy()
@@ -473,6 +693,45 @@ def add_target_variable(df: pd.DataFrame) -> pd.DataFrame:
     df_target = df_target.dropna(subset=['target'])
     
     print(f"Added target variable. Rows with valid targets: {len(df_target)}")
+    return df_target
+
+
+def add_target_variable_temporal_safe(df: pd.DataFrame, split_date: str = None, 
+                                     is_training: bool = True) -> pd.DataFrame:
+    """Add target variable with TEMPORAL ALIGNMENT to prevent data leakage."""
+    df_target = df.copy()
+    
+    # Calculate target for each symbol separately with temporal constraints
+    target_data = []
+    
+    for symbol in df['symbol'].unique():
+        symbol_df = df[df['symbol'] == symbol].copy()
+        symbol_df = symbol_df.sort_values('date')
+        
+        # TEMPORAL-SAFE target calculation
+        # Target at time t should predict value at t+1 (next day)
+        symbol_df['target'] = symbol_df['close'].pct_change().shift(-1)
+        symbol_df['target_price'] = symbol_df['close'].shift(-1)
+        symbol_df['target_direction'] = (symbol_df['target'] > 0).astype(int)
+        
+        # CRITICAL: For training data with split, ensure no future information leakage
+        if split_date and is_training:
+            split_dt = pd.to_datetime(split_date)
+            # Remove target values that would use information beyond split date
+            future_mask = symbol_df['date'] >= split_dt - pd.Timedelta(days=1)
+            symbol_df.loc[future_mask, 'target'] = np.nan
+            symbol_df.loc[future_mask, 'target_price'] = np.nan
+            symbol_df.loc[future_mask, 'target_direction'] = np.nan
+        
+        target_data.append(symbol_df)
+    
+    df_target = pd.concat(target_data, ignore_index=True)
+    df_target = df_target.sort_values(['symbol', 'date']).reset_index(drop=True)
+    
+    # Remove rows with NaN targets
+    df_target = df_target.dropna(subset=['target'])
+    
+    print("Added target variables with TEMPORAL ALIGNMENT")
     return df_target
 
 
@@ -595,6 +854,66 @@ def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     return df_filled
 
 
+def handle_missing_values_temporal_safe(df: pd.DataFrame, split_date: str = None, 
+                                       is_training: bool = True) -> pd.DataFrame:
+    """Handle missing values with TEMPORAL CONSTRAINTS to prevent data leakage."""
+    if df.empty:
+        print("⚠️  Empty DataFrame passed to handle_missing_values_temporal_safe")
+        return df
+        
+    df_filled = df.copy()
+    
+    # Get numeric columns (excluding categorical and datetime)
+    exclude_cols = ['symbol', 'date', 'sector']
+    numeric_cols = df_filled.select_dtypes(include=[np.number]).columns
+    numeric_cols = [col for col in numeric_cols if col not in exclude_cols]
+    
+    # TEMPORAL-SAFE filling within each symbol group
+    if 'symbol' in df_filled.columns:
+        for symbol in df_filled['symbol'].unique():
+            symbol_mask = df_filled['symbol'] == symbol
+            symbol_data = df_filled.loc[symbol_mask].copy()
+            
+            if split_date and is_training:
+                # CRITICAL FIX: Separate filling for train vs validation periods
+                split_dt = pd.to_datetime(split_date)
+                train_mask = symbol_data['date'] <= split_dt
+                val_mask = symbol_data['date'] > split_dt
+                
+                if train_mask.any():
+                    # Fill training period with forward/backward fill
+                    train_data = symbol_data.loc[train_mask, numeric_cols].ffill().bfill().fillna(0)
+                    symbol_data.loc[train_mask, numeric_cols] = train_data
+                    
+                    if val_mask.any():
+                        # For validation: forward fill from last training values (no future info)
+                        last_train_values = train_data.iloc[-1] if len(train_data) > 0 else 0
+                        val_data = symbol_data.loc[val_mask, numeric_cols].copy()
+                        
+                        # Fill each column with last known training value, then forward fill
+                        for col in numeric_cols:
+                            val_data[col] = val_data[col].fillna(last_train_values[col] if hasattr(last_train_values, col) else 0)
+                            val_data[col] = val_data[col].ffill().fillna(0)
+                        
+                        symbol_data.loc[val_mask, numeric_cols] = val_data
+                
+                df_filled.loc[symbol_mask] = symbol_data
+            else:
+                # Standard forward/backward fill for prediction data
+                df_filled.loc[symbol_mask, numeric_cols] = (
+                    df_filled.loc[symbol_mask, numeric_cols]
+                    .ffill()
+                    .bfill()
+                    .fillna(0)
+                )
+    else:
+        # If no symbol column (shouldn't happen but be safe)
+        df_filled[numeric_cols] = df_filled[numeric_cols].ffill().bfill().fillna(0)
+    
+    print("Handled missing values with TEMPORAL CONSTRAINTS")
+    return df_filled
+
+
 def final_cleanup(df: pd.DataFrame) -> pd.DataFrame:
     """Final cleanup and validation of feature matrix."""
     df_clean = df.copy()
@@ -630,4 +949,69 @@ def final_cleanup(df: pd.DataFrame) -> pd.DataFrame:
     # Sort final result
     df_clean = df_clean.sort_values(['symbol', 'time_idx']).reset_index(drop=True)
     
+    return df_clean
+
+
+def final_cleanup_temporal_safe(df: pd.DataFrame, split_date: str = None, 
+                               is_training: bool = True) -> pd.DataFrame:
+    """Final cleanup with TEMPORAL VALIDATION to ensure no data leakage."""
+    df_clean = df.copy()
+    
+    # Convert categorical features to string type for TFT
+    categorical_features = [
+        'is_earnings_day', 'is_split_day', 'is_dividend_day', 
+        'is_holiday', 'is_weekend'
+    ]
+    
+    for col in categorical_features:
+        if col in df_clean.columns:
+            df_clean[col] = df_clean[col].astype(str)
+    
+    # Ensure symbol and sector are strings
+    if 'symbol' in df_clean.columns:
+        df_clean['symbol'] = df_clean['symbol'].astype(str)
+    if 'sector' in df_clean.columns:
+        df_clean['sector'] = df_clean['sector'].astype(str)
+    
+    # Ensure no infinite values
+    numeric_cols = df_clean.select_dtypes(include=[np.number]).columns
+    df_clean[numeric_cols] = df_clean[numeric_cols].replace([np.inf, -np.inf], np.nan)
+    df_clean[numeric_cols] = df_clean[numeric_cols].fillna(0)
+    
+    # TEMPORAL VALIDATION: Check for data leakage
+    if split_date and is_training:
+        split_dt = pd.to_datetime(split_date)
+        train_mask = df_clean['date'] <= split_dt
+        val_mask = df_clean['date'] > split_dt
+        
+        train_count = train_mask.sum()
+        val_count = val_mask.sum()
+        
+        print(f"TEMPORAL VALIDATION:")
+        print(f"  Training samples: {train_count}")
+        print(f"  Validation samples: {val_count}")
+        print(f"  Split date: {split_dt}")
+        
+        if val_count == 0:
+            print("  ⚠️  WARNING: No validation data after split!")
+        
+        # Validate time_idx progression
+        if 'time_idx' in df_clean.columns:
+            max_train_time = df_clean.loc[train_mask, 'time_idx'].max() if train_mask.any() else -1
+            min_val_time = df_clean.loc[val_mask, 'time_idx'].min() if val_mask.any() else float('inf')
+            
+            if min_val_time <= max_train_time:
+                print(f"  ⚠️  WARNING: Temporal overlap in time_idx! Max train: {max_train_time}, Min val: {min_val_time}")
+    
+    # Ensure all required columns exist
+    required_cols = ['symbol', 'date', 'time_idx', 'target']
+    missing_cols = [col for col in required_cols if col not in df_clean.columns]
+    
+    if missing_cols:
+        print(f"Warning: Missing required columns: {missing_cols}")
+    
+    # Sort final result
+    df_clean = df_clean.sort_values(['symbol', 'time_idx']).reset_index(drop=True)
+    
+    print("Final cleanup completed with TEMPORAL VALIDATION")
     return df_clean

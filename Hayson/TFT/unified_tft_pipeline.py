@@ -94,7 +94,7 @@ class TFTTrainer:
         
         # Calculate validation split dates with proper temporal separation
         validation_split = self.config.get('validation_split', 0.8)  # 80% train, 20% validation
-        lookahead_buffer_days = self.config.get('lookahead_buffer', 5)  # 5-day buffer to prevent leakage
+        lookahead_buffer_days = self.config.get('lookahead_buffer', 21)  # FIXED: 21-day buffer (1 trading month)
         
         from datetime import datetime, timedelta
         start_dt = datetime.strptime(start_date, '%Y-%m-%d')
@@ -146,7 +146,7 @@ class TFTTrainer:
             val_symbols = holdout_symbols
             print(f"   🔒 Symbol holdout: Training on {train_symbols}, validating on {holdout_symbols}")
         
-        # Load training data
+        # Load training data with temporal constraint parameters
         print("   🔄 Loading training data...")
         train_dataloader, train_datamodule = get_data_loader_with_module(
             symbols=train_symbols,
@@ -157,11 +157,14 @@ class TFTTrainer:
             batch_size=self.config['batch_size'],
             news_api_key=self.config.get('news_api_key'),
             fred_api_key=self.config.get('fred_api_key'),
-            api_ninjas_key=self.config.get('api_ninjas_key')
+            api_ninjas_key=self.config.get('api_ninjas_key'),
+            # CRITICAL FIX: Pass split date for temporal constraint enforcement
+            split_date=train_end,
+            is_training=True
         )
         
-        # Load validation data with strict temporal separation
-        print("   🔄 Loading validation data...")
+        # CRITICAL FIX: Load validation data using TRAINING normalization parameters
+        print("   🔄 Loading validation data with shared normalization...")
         val_dataloader, val_datamodule = get_data_loader_with_module(
             symbols=val_symbols,
             start=val_start,
@@ -171,7 +174,11 @@ class TFTTrainer:
             batch_size=self.config['batch_size'],
             news_api_key=self.config.get('news_api_key'),
             fred_api_key=self.config.get('fred_api_key'),
-            api_ninjas_key=self.config.get('api_ninjas_key')
+            api_ninjas_key=self.config.get('api_ninjas_key'),
+            # CRITICAL FIX: Pass training normalization parameters to prevent leakage
+            split_date=train_end,
+            is_training=False,
+            reference_datamodule=train_datamodule  # Use training normalization params
         )
         
         print("✅ Data loaded successfully!")

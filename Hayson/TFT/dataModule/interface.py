@@ -156,9 +156,12 @@ def get_data_loader_with_module(symbols: List[str], start: str, end: str,
         batch_size: int,
         news_api_key: Optional[str] = None,
         fred_api_key: Optional[str] = None,
-        api_ninjas_key: Optional[str] = None) -> Tuple[DataLoader, TFTDataModule]:
+        api_ninjas_key: Optional[str] = None,
+        split_date: Optional[str] = None,
+        is_training: bool = True,
+        reference_datamodule: Optional[Any] = None) -> Tuple[DataLoader, Any]:
     """
-    High-level entry point that returns both DataLoader and DataModule for detailed analysis.
+    High-level entry point with TEMPORAL CONSTRAINT SUPPORT to prevent data leakage.
     
     Args:
         symbols: List of stock symbols (e.g., ['AAPL', 'GOOGL'])
@@ -170,6 +173,9 @@ def get_data_loader_with_module(symbols: List[str], start: str, end: str,
         news_api_key: News API key for news embeddings (optional)
         fred_api_key: FRED API key for macroeconomic data (optional)
         api_ninjas_key: API-Ninjas key for earnings calendar (optional)
+        split_date: Date for train/validation split to enforce temporal constraints
+        is_training: Whether this is for training data (affects temporal constraints)
+        reference_datamodule: Training datamodule to copy normalization params (prevents leakage)
     
     Returns:
         Tuple of (DataLoader, TFTDataModule) for training and analysis
@@ -177,6 +183,10 @@ def get_data_loader_with_module(symbols: List[str], start: str, end: str,
     print(f"Starting TFT data pipeline for symbols: {symbols}")
     print(f"Date range: {start} to {end}")
     print(f"Encoder length: {encoder_len}, Predict length: {predict_len}")
+    if split_date:
+        print(f"TEMPORAL CONSTRAINTS: Split date = {split_date}, is_training = {is_training}")
+    if reference_datamodule:
+        print(f"NORMALIZATION CONSTRAINT: Using reference datamodule normalization parameters")
     
     # Initialize caching system
     cache = None
@@ -221,31 +231,34 @@ def get_data_loader_with_module(symbols: List[str], start: str, end: str,
         fred_df = fetch_fred_data(start, end, fred_api_key)
     print(f"   Retrieved {len(fred_df)} economic data points")
     
-    # Step 5: Compute technical indicators (with caching)
-    print("5. Computing technical indicators...")
+    # Step 5: Compute technical indicators with TEMPORAL CONSTRAINTS (with caching)
+    print("5. Computing technical indicators with temporal constraints...")
     if cache:
-        ta_df = cache.get_or_fetch_ta_data(stock_df, compute_technical_indicators)
+        ta_df = cache.get_or_fetch_ta_data(stock_df, 
+                                         lambda df: compute_technical_indicators(df, split_date=split_date, is_training=is_training))
     else:
-        ta_df = compute_technical_indicators(stock_df)
+        ta_df = compute_technical_indicators(stock_df, split_date=split_date, is_training=is_training)
     print(f"   Computed technical indicators for {len(ta_df)} data points")
     
-    # Step 6: Build features (with caching)
-    print("6. Building feature matrix...")
+    # Step 6: Build features with TEMPORAL CONSTRAINTS (with caching)
+    print("6. Building feature matrix with temporal constraints...")
     if cache:
         feature_df = cache.get_or_build_features(stock_df, events_data, news_df, ta_df, fred_df,
-                                               encoder_len, predict_len, build_features)
+                                               encoder_len, predict_len, 
+                                               lambda *args: build_features(*args, split_date=split_date, is_training=is_training))
     else:
         feature_df = build_features(stock_df, events_data, news_df, ta_df, fred_df,
-                                  encoder_len, predict_len)
+                                  encoder_len, predict_len, split_date=split_date, is_training=is_training)
     print(f"   Built feature matrix with shape: {feature_df.shape}")
     
-    # Step 7: Create DataModule and DataLoader
-    print("7. Creating DataLoader...")
+    # Step 7: Create DataModule and DataLoader with temporal constraints
+    print("7. Creating DataLoader with temporal constraints...")
     datamodule = TFTDataModule(
         feature_df=feature_df,
         encoder_len=encoder_len,
         predict_len=predict_len,
-        batch_size=batch_size
+        batch_size=batch_size,
+        reference_datamodule=reference_datamodule  # CRITICAL: Use reference normalization
     )
     
     datamodule.setup()

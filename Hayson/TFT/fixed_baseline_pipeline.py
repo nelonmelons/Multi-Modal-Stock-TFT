@@ -29,6 +29,7 @@ from pathlib import Path
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.dummy import DummyRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 # Setup paths and suppress warnings
@@ -230,7 +231,7 @@ class FixedBaselineRunner:
         self.models = {}
         
     def initialize_models(self):
-        """Initialize baseline models."""
+        """Initialize baseline models including naive baselines for comparison."""
         self.models = {
             'Linear Regression': LinearRegression(),
             'Random Forest': RandomForestRegressor(
@@ -250,6 +251,14 @@ class FixedBaselineRunner:
                 n_jobs=-1,
                 verbosity=0  # Suppress XGBoost warnings
             )
+        
+        # Add naive baselines to show what poor predictions look like
+        # Note: 'uniform' strategy is not available in all sklearn versions
+        self.models.update({
+            'Zero Baseline': DummyRegressor(strategy='constant', constant=0.0),
+            'Mean Baseline': DummyRegressor(strategy='mean'),
+            'Median Baseline': DummyRegressor(strategy='median')
+        })
     
     def calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray, 
                          current_prices: np.ndarray) -> Dict[str, float]:
@@ -260,37 +269,89 @@ class FixedBaselineRunner:
             mae_returns = mean_absolute_error(y_true, y_pred)
             r2_returns = r2_score(y_true, y_pred)
             
-            # Convert returns to prices for price-based metrics
-            predicted_prices = current_prices * (1 + y_pred)
-            actual_prices = current_prices * (1 + y_true)
+            # OLD METHOD (flawed): Convert returns to prices using same base price
+            predicted_prices_old = current_prices * (1 + y_pred)
+            actual_prices_old = current_prices * (1 + y_true)
             
-            mse_prices = mean_squared_error(actual_prices, predicted_prices)
-            mae_prices = mean_absolute_error(actual_prices, predicted_prices)
-            r2_prices = r2_score(actual_prices, predicted_prices)
+            # CORRECTED METHOD: Cumulative price reconstruction
+            predicted_prices_corrected = [current_prices[0]]
+            actual_prices_corrected = [current_prices[0]]
+            
+            for i in range(len(y_pred)):
+                if i == 0:
+                    predicted_prices_corrected.append(current_prices[0] * (1 + y_pred[i]))
+                    actual_prices_corrected.append(current_prices[0] * (1 + y_true[i]))
+                else:
+                    predicted_prices_corrected.append(predicted_prices_corrected[-1] * (1 + y_pred[i]))
+                    actual_prices_corrected.append(actual_prices_corrected[-1] * (1 + y_true[i]))
+            
+            # Remove first element (starting price)
+            predicted_prices_corrected = np.array(predicted_prices_corrected[1:])
+            actual_prices_corrected = np.array(actual_prices_corrected[1:])
+            
+            # Calculate corrected price metrics
+            mse_prices_corrected = mean_squared_error(actual_prices_corrected, predicted_prices_corrected)
+            mae_prices_corrected = mean_absolute_error(actual_prices_corrected, predicted_prices_corrected)
+            r2_prices_corrected = r2_score(actual_prices_corrected, predicted_prices_corrected)
+            
+            # Calculate old (flawed) price metrics for comparison
+            mse_prices_old = mean_squared_error(actual_prices_old, predicted_prices_old)
+            mae_prices_old = mean_absolute_error(actual_prices_old, predicted_prices_old)
+            r2_prices_old = r2_score(actual_prices_old, predicted_prices_old)
             
             # Calculate percentage errors with protection against division by zero
             mape_returns = np.mean(np.abs((y_true - y_pred) / (np.abs(y_true) + 1e-8))) * 100
-            mape_prices = np.mean(np.abs((actual_prices - predicted_prices) / (actual_prices + 1e-8))) * 100
+            mape_prices_old = np.mean(np.abs((actual_prices_old - predicted_prices_old) / (actual_prices_old + 1e-8))) * 100
+            mape_prices_corrected = np.mean(np.abs((actual_prices_corrected - predicted_prices_corrected) / (actual_prices_corrected + 1e-8))) * 100
+            
+            # Calculate cumulative return accuracy (important for trading strategies)
+            cumulative_actual = np.prod(1 + y_true) - 1
+            cumulative_predicted = np.prod(1 + y_pred) - 1
+            cumulative_return_error = abs(cumulative_actual - cumulative_predicted)
+            
+            # Calculate directional accuracy (what % of time did we predict direction correctly)
+            actual_directions = np.sign(y_true)
+            predicted_directions = np.sign(y_pred)
+            directional_accuracy = np.mean(actual_directions == predicted_directions) * 100
             
             return {
+                # Return-based metrics
                 'mse_returns': float(mse_returns),
                 'mae_returns': float(mae_returns),
                 'r2_returns': float(r2_returns),
                 'mape_returns': float(mape_returns),
-                'mse_prices': float(mse_prices),
-                'mae_prices': float(mae_prices),
-                'r2_prices': float(r2_prices),
-                'mape_prices': float(mape_prices),
+                
+                # OLD (flawed) price metrics
+                'mse_prices_old': float(mse_prices_old),
+                'mae_prices_old': float(mae_prices_old),
+                'r2_prices_old': float(r2_prices_old),
+                'mape_prices_old': float(mape_prices_old),
+                
+                # CORRECTED price metrics
+                'mse_prices_corrected': float(mse_prices_corrected),
+                'mae_prices_corrected': float(mae_prices_corrected),
+                'r2_prices_corrected': float(r2_prices_corrected),
+                'mape_prices_corrected': float(mape_prices_corrected),
+                
+                # Additional useful metrics
                 'return_volatility': float(np.std(y_pred)),
-                'price_volatility': float(np.std(predicted_prices)),
+                'price_volatility_corrected': float(np.std(predicted_prices_corrected)),
+                'cumulative_return_error': float(cumulative_return_error),
+                'directional_accuracy': float(directional_accuracy),
+                'cumulative_actual_return': float(cumulative_actual),
+                'cumulative_predicted_return': float(cumulative_predicted),
             }
         except Exception as e:
             print(f"⚠️ Error calculating metrics: {e}")
             return {
                 'mse_returns': np.inf, 'mae_returns': np.inf, 'r2_returns': -np.inf,
-                'mape_returns': np.inf, 'mse_prices': np.inf, 'mae_prices': np.inf,
-                'r2_prices': -np.inf, 'mape_prices': np.inf, 'return_volatility': 0.0,
-                'price_volatility': 0.0
+                'mape_returns': np.inf, 'mse_prices_old': np.inf, 'mae_prices_old': np.inf,
+                'r2_prices_old': -np.inf, 'mape_prices_old': np.inf,
+                'mse_prices_corrected': np.inf, 'mae_prices_corrected': np.inf,
+                'r2_prices_corrected': -np.inf, 'mape_prices_corrected': np.inf,
+                'return_volatility': 0.0, 'price_volatility_corrected': 0.0,
+                'cumulative_return_error': np.inf, 'directional_accuracy': 0.0,
+                'cumulative_actual_return': 0.0, 'cumulative_predicted_return': 0.0
             }
     
     def train_and_evaluate_symbol(self, stock_data: pd.DataFrame, symbol: str, 
@@ -382,6 +443,8 @@ class FixedBaselineRunner:
                     }
                     
                     print(f"✅ {model_name} ({pred_type}) - R²: {metrics['r2_returns']:.4f}, MAE: {metrics['mae_returns']:.4f}")
+                    print(f"   📊 Corrected Price R²: {metrics['r2_prices_corrected']:.4f}, MAE: ${metrics['mae_prices_corrected']:.2f}")
+                    print(f"   📊 Directional Accuracy: {metrics['directional_accuracy']:.1f}%")
                     print(f"   Standard comparison - R²: {standard_metrics['r2_returns']:.4f}, MAE: {standard_metrics['mae_returns']:.4f}")
                     
                 except Exception as e:
@@ -397,7 +460,7 @@ class FixedBaselineRunner:
             return
     
     def create_symbol_plots(self, symbol: str):
-        """Create plots for a specific symbol."""
+        """Create plots for a specific symbol with CORRECTED price reconstruction."""
         if symbol not in self.results or len(self.results[symbol]) == 0:
             print(f"⚠️ No results to plot for {symbol}")
             return
@@ -408,12 +471,12 @@ class FixedBaselineRunner:
         n_models = len(symbol_results)
         
         try:
-            # Create subplots for each model
-            fig, axes = plt.subplots(n_models, 3, figsize=(18, 6*n_models))
+            # Create subplots for each model (now 4 plots per model)
+            fig, axes = plt.subplots(n_models, 4, figsize=(24, 6*n_models))
             if n_models == 1:
                 axes = axes.reshape(1, -1)
             
-            fig.suptitle(f'{symbol} - Stock Return Predictions', fontsize=16, fontweight='bold')
+            fig.suptitle(f'{symbol} - Stock Predictions (CORRECTED)', fontsize=16, fontweight='bold')
             
             for i, (model_name, result) in enumerate(symbol_results.items()):
                 predictions = result['predictions']
@@ -421,9 +484,28 @@ class FixedBaselineRunner:
                 timestamps = result['timestamps']
                 prices = result['prices']
                 
-                # Convert to prices for plotting
-                predicted_prices = prices * (1 + predictions)
-                actual_prices = prices * (1 + actuals)
+                # CORRECTED: Cumulative price reconstruction
+                # Start with the first actual price and build sequentially
+                predicted_prices_corrected = [prices[0]]  # Start with first actual price
+                actual_prices_corrected = [prices[0]]     # Start with first actual price
+                
+                for j in range(len(predictions)):
+                    if j == 0:
+                        # First prediction: use the actual starting price
+                        predicted_prices_corrected.append(prices[0] * (1 + predictions[j]))
+                        actual_prices_corrected.append(prices[0] * (1 + actuals[j]))
+                    else:
+                        # Subsequent predictions: build on previous predicted/actual price
+                        predicted_prices_corrected.append(predicted_prices_corrected[-1] * (1 + predictions[j]))
+                        actual_prices_corrected.append(actual_prices_corrected[-1] * (1 + actuals[j]))
+                
+                # Remove the first element (it was just the starting price)
+                predicted_prices_corrected = np.array(predicted_prices_corrected[1:])
+                actual_prices_corrected = np.array(actual_prices_corrected[1:])
+                
+                # OLD METHOD (for comparison) - the flawed approach
+                predicted_prices_old = prices * (1 + predictions)
+                actual_prices_old = prices * (1 + actuals)
                 
                 # Plot 1: Returns over time
                 axes[i, 0].plot(timestamps, actuals, color='blue', linewidth=2, label='Actual Returns', alpha=0.8)
@@ -434,31 +516,45 @@ class FixedBaselineRunner:
                 axes[i, 0].grid(True, alpha=0.3)
                 axes[i, 0].tick_params(axis='x', rotation=45)
                 
-                # Plot 2: Price predictions
-                axes[i, 1].plot(timestamps, actual_prices, color='blue', linewidth=2, label='Actual Prices', alpha=0.8)
-                axes[i, 1].plot(timestamps, predicted_prices, color='red', linewidth=2, label='Predicted Prices', alpha=0.8)
-                axes[i, 1].set_title(f'{model_name} - Price Predictions')
+                # Plot 2: CORRECTED Cumulative Price Predictions  
+                axes[i, 1].plot(timestamps, actual_prices_corrected, color='blue', linewidth=2, label='Actual Price Path', alpha=0.8)
+                axes[i, 1].plot(timestamps, predicted_prices_corrected, color='red', linewidth=2, label='Predicted Price Path', alpha=0.8)
+                axes[i, 1].set_title(f'{model_name} - CORRECTED Price Predictions')
                 axes[i, 1].set_ylabel('Price ($)')
                 axes[i, 1].legend()
                 axes[i, 1].grid(True, alpha=0.3)
                 axes[i, 1].tick_params(axis='x', rotation=45)
                 
-                # Plot 3: Prediction vs Actual scatter
-                axes[i, 2].scatter(actuals, predictions, alpha=0.6, s=20)
+                # Plot 3: OLD (Flawed) Price Predictions for comparison
+                axes[i, 2].plot(timestamps, actual_prices_old, color='blue', linewidth=2, label='Actual Prices (OLD)', alpha=0.8)
+                axes[i, 2].plot(timestamps, predicted_prices_old, color='red', linewidth=2, label='Predicted Prices (OLD)', alpha=0.8)
+                axes[i, 2].set_title(f'{model_name} - OLD (Flawed) Price Method')
+                axes[i, 2].set_ylabel('Price ($)')
+                axes[i, 2].legend()
+                axes[i, 2].grid(True, alpha=0.3)
+                axes[i, 2].tick_params(axis='x', rotation=45)
+                
+                # Plot 4: Prediction vs Actual scatter (returns)
+                axes[i, 3].scatter(actuals, predictions, alpha=0.6, s=20)
                 min_val = min(actuals.min(), predictions.min())
                 max_val = max(actuals.max(), predictions.max())
-                axes[i, 2].plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8)
-                axes[i, 2].set_title(f'{model_name} - Predicted vs Actual')
-                axes[i, 2].set_xlabel('Actual Returns')
-                axes[i, 2].set_ylabel('Predicted Returns')
-                axes[i, 2].grid(True, alpha=0.3)
+                axes[i, 3].plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8)
+                axes[i, 3].set_title(f'{model_name} - Predicted vs Actual Returns')
+                axes[i, 3].set_xlabel('Actual Returns')
+                axes[i, 3].set_ylabel('Predicted Returns')
+                axes[i, 3].grid(True, alpha=0.3)
+                
+                # Calculate and display corrected price metrics
+                price_mae = np.mean(np.abs(actual_prices_corrected - predicted_prices_corrected))
+                price_mape = np.mean(np.abs((actual_prices_corrected - predicted_prices_corrected) / actual_prices_corrected)) * 100
+                print(f"  📊 {model_name} - Corrected Price MAE: ${price_mae:.2f}, MAPE: {price_mape:.2f}%")
             
             plt.tight_layout()
-            plot_path = self.output_dir / f"{symbol}_predictions.png"
+            plot_path = self.output_dir / f"{symbol}_predictions_corrected.png"
             plt.savefig(plot_path, dpi=300, bbox_inches='tight')
             plt.close()
             
-            print(f"  📈 {symbol} plots saved to {plot_path}")
+            print(f"  📈 {symbol} corrected plots saved to {plot_path}")
             
         except Exception as e:
             print(f"❌ Failed to create plots for {symbol}: {e}")
@@ -484,40 +580,54 @@ class FixedBaselineRunner:
             metrics_df = pd.DataFrame(all_metrics)
             
             # Create comparison plots
-            fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-            fig.suptitle('Model Performance Comparison Across All Symbols', fontsize=16, fontweight='bold')
+            fig, axes = plt.subplots(2, 3, figsize=(20, 12))
+            fig.suptitle('Model Performance Comparison - CORRECTED METRICS', fontsize=16, fontweight='bold')
             
-            # R² by model and symbol
+            # R² (Returns) by model and symbol
             r2_pivot = metrics_df.pivot(index='symbol', columns='model', values='r2_returns')
             r2_pivot.plot(kind='bar', ax=axes[0, 0])
-            axes[0, 0].set_title('R² Score by Model and Symbol')
+            axes[0, 0].set_title('R² Score (Returns) by Model and Symbol')
             axes[0, 0].set_ylabel('R² Score')
             axes[0, 0].tick_params(axis='x', rotation=45)
             axes[0, 0].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             
-            # MAE by model and symbol
-            mae_pivot = metrics_df.pivot(index='symbol', columns='model', values='mae_returns')
-            mae_pivot.plot(kind='bar', ax=axes[0, 1])
-            axes[0, 1].set_title('MAE by Model and Symbol')
-            axes[0, 1].set_ylabel('MAE')
+            # R² (Corrected Prices) by model and symbol
+            r2_price_pivot = metrics_df.pivot(index='symbol', columns='model', values='r2_prices_corrected')
+            r2_price_pivot.plot(kind='bar', ax=axes[0, 1])
+            axes[0, 1].set_title('R² Score (Corrected Prices) by Model and Symbol')
+            axes[0, 1].set_ylabel('R² Score')
             axes[0, 1].tick_params(axis='x', rotation=45)
             axes[0, 1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            
+            # Directional Accuracy by model and symbol
+            dir_acc_pivot = metrics_df.pivot(index='symbol', columns='model', values='directional_accuracy')
+            dir_acc_pivot.plot(kind='bar', ax=axes[0, 2])
+            axes[0, 2].set_title('Directional Accuracy by Model and Symbol')
+            axes[0, 2].set_ylabel('Accuracy (%)')
+            axes[0, 2].tick_params(axis='x', rotation=45)
+            axes[0, 2].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             
             # Average performance by model
             avg_metrics = metrics_df.groupby('model').agg({
                 'r2_returns': 'mean',
-                'mae_returns': 'mean'
+                'r2_prices_corrected': 'mean',
+                'directional_accuracy': 'mean'
             })
             
             avg_metrics['r2_returns'].plot(kind='bar', ax=axes[1, 0])
-            axes[1, 0].set_title('Average R² Score by Model')
+            axes[1, 0].set_title('Average R² Score (Returns) by Model')
             axes[1, 0].set_ylabel('Average R² Score')
             axes[1, 0].tick_params(axis='x', rotation=45)
             
-            avg_metrics['mae_returns'].plot(kind='bar', ax=axes[1, 1])
-            axes[1, 1].set_title('Average MAE by Model')
-            axes[1, 1].set_ylabel('Average MAE')
+            avg_metrics['r2_prices_corrected'].plot(kind='bar', ax=axes[1, 1])
+            axes[1, 1].set_title('Average R² Score (Corrected Prices) by Model')
+            axes[1, 1].set_ylabel('Average R² Score')
             axes[1, 1].tick_params(axis='x', rotation=45)
+            
+            avg_metrics['directional_accuracy'].plot(kind='bar', ax=axes[1, 2])
+            axes[1, 2].set_title('Average Directional Accuracy by Model')
+            axes[1, 2].set_ylabel('Average Accuracy (%)')
+            axes[1, 2].tick_params(axis='x', rotation=45)
             
             plt.tight_layout()
             comparison_path = self.output_dir / "model_comparison.png"
@@ -551,20 +661,28 @@ class FixedBaselineRunner:
             for symbol, symbol_results in self.results.items():
                 for model_name, result in symbol_results.items():
                     if model_name not in model_averages:
-                        model_averages[model_name] = {'r2': [], 'mae': [], 'mape': []}
+                        model_averages[model_name] = {
+                            'r2': [], 'mae': [], 'mape': [], 
+                            'r2_price_corrected': [], 'mae_price_corrected': [],
+                            'directional_accuracy': [], 'cumulative_error': []
+                        }
                     
                     metrics = result['metrics']
                     model_averages[model_name]['r2'].append(metrics['r2_returns'])
                     model_averages[model_name]['mae'].append(metrics['mae_returns'])
-                    model_averages[model_name]['mape'].append(metrics['mape_prices'])
+                    model_averages[model_name]['mape'].append(metrics['mape_prices_corrected'])
+                    model_averages[model_name]['r2_price_corrected'].append(metrics['r2_prices_corrected'])
+                    model_averages[model_name]['mae_price_corrected'].append(metrics['mae_prices_corrected'])
+                    model_averages[model_name]['directional_accuracy'].append(metrics['directional_accuracy'])
+                    model_averages[model_name]['cumulative_error'].append(metrics['cumulative_return_error'])
             
             if not model_averages:
                 print("❌ No model results to average")
                 return
             
-            # Print summary table
-            print(f"{'Model':<20} {'Avg R² (Returns)':<18} {'Avg MAE (Returns)':<18} {'Avg MAPE (Prices)':<18}")
-            print("-" * 74)
+            # Print comprehensive summary table
+            print(f"{'Model':<20} {'R²(Ret)':<10} {'MAE(Ret)':<12} {'R²(Price)':<12} {'MAE($)':<10} {'Dir.Acc':<8} {'Cum.Err':<10}")
+            print("-" * 102)
             
             best_r2 = -np.inf
             best_model = ""
@@ -572,9 +690,12 @@ class FixedBaselineRunner:
             for model_name, metrics in model_averages.items():
                 avg_r2 = np.mean(metrics['r2'])
                 avg_mae = np.mean(metrics['mae'])
-                avg_mape = np.mean(metrics['mape'])
+                avg_r2_price = np.mean(metrics['r2_price_corrected'])
+                avg_mae_price = np.mean(metrics['mae_price_corrected'])
+                avg_dir_acc = np.mean(metrics['directional_accuracy'])
+                avg_cum_err = np.mean(metrics['cumulative_error'])
                 
-                print(f"{model_name:<20} {avg_r2:<18.4f} {avg_mae:<18.4f} {avg_mape:<18.2f}%")
+                print(f"{model_name:<20} {avg_r2:<10.4f} {avg_mae:<12.4f} {avg_r2_price:<12.4f} {avg_mae_price:<10.2f} {avg_dir_acc:<8.1f}% {avg_cum_err:<10.4f}")
                 
                 if avg_r2 > best_r2:
                     best_r2 = avg_r2
@@ -583,18 +704,18 @@ class FixedBaselineRunner:
             print(f"\n🏆 Best performing model (avg): {best_model} (R² = {best_r2:.4f})")
             
             # Print per-symbol details
-            print(f"\n📊 Per-Symbol Performance:")
+            print(f"\n📊 Per-Symbol Performance (Corrected Metrics):")
             for symbol in self.results:
                 print(f"\n  {symbol}:")
                 for model_name, result in self.results[symbol].items():
                     metrics = result['metrics']
-                    print(f"    {model_name:<15}: R² = {metrics['r2_returns']:.4f}, MAE = {metrics['mae_returns']:.4f}")
+                    print(f"    {model_name:<15}: R²(Ret)={metrics['r2_returns']:.4f}, R²(Price)={metrics['r2_prices_corrected']:.4f}, Dir={metrics['directional_accuracy']:.1f}%")
                     
         except Exception as e:
             print(f"❌ Error in summary: {e}")
 
 def main():
-    """Main function to run the fixed baseline pipeline."""
+    """Main function to run the CORRECTED baseline pipeline."""
     
     # Configuration
     symbols = ['AAPL', 'GOOGL', 'MSFT']  # Popular tech stocks
@@ -603,11 +724,13 @@ def main():
     test_split = 0.2  # 20% for testing
     use_autoregressive = True  # Enable TRUE autoregressive predictions
     
-    print("🚀 Starting Fixed Baseline Models Pipeline")
+    print("🚀 Starting CORRECTED Baseline Models Pipeline")
     print(f"📅 Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🎯 Symbols: {symbols}")
     print(f"📊 Date range: {start_date} to {end_date}")
     print(f"🔮 Autoregressive predictions: {use_autoregressive}")
+    print(f"⚠️  FIXED: Cumulative price reconstruction for accurate evaluation")
+    print(f"⚠️  ADDED: Naive baselines to show what poor predictions look like")
     
     try:
         # Step 1: Fetch stock data

@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 from pytorch_forecasting import TimeSeriesDataSet
 from pytorch_forecasting.data import GroupNormalizer
+from typing import Optional, Any
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -17,9 +18,10 @@ class TFTDataModule:
     
     def __init__(self, feature_df: pd.DataFrame,
                  encoder_len: int, predict_len: int,
-                 batch_size: int, val_split: float = 0.2):
+                 batch_size: int, val_split: float = 0.2,
+                 reference_datamodule: Optional[Any] = None):
         """
-        Initialize TFT DataModule.
+        Initialize TFT DataModule with TEMPORAL CONSTRAINT SUPPORT.
         
         Args:
             feature_df: Feature DataFrame from build_features
@@ -27,12 +29,14 @@ class TFTDataModule:
             predict_len: Prediction sequence length  
             batch_size: Batch size for DataLoader
             val_split: Validation split ratio
+            reference_datamodule: Reference datamodule for shared normalization (prevents leakage)
         """
         self.feature_df = feature_df.copy()
         self.encoder_len = encoder_len
         self.predict_len = predict_len
         self.batch_size = batch_size
         self.val_split = val_split
+        self.reference_datamodule = reference_datamodule  # CRITICAL: For shared normalization
         
         self.dataset = None
         self.train_loader = None
@@ -62,30 +66,42 @@ class TFTDataModule:
         # Split train/validation
         train_df, val_df = self._split_train_val()
         
-        # Create training dataset
-        self.train_dataset = TimeSeriesDataSet(
-            train_df,
-            time_idx="time_idx",
-            target="target",
-            group_ids=["symbol"],
-            min_encoder_length=max(1, self.encoder_len // 4),  # More flexible minimum
-            max_encoder_length=self.encoder_len,
-            min_prediction_length=1,
-            max_prediction_length=self.predict_len,
-            static_categoricals=static_categoricals,
-            static_reals=static_reals,
-            time_varying_known_categoricals=time_varying_known_categoricals,
-            time_varying_known_reals=time_varying_known_reals,
-            time_varying_unknown_categoricals=[],  # None in our case
-            time_varying_unknown_reals=time_varying_unknown_reals,
-            target_normalizer=GroupNormalizer(
-                groups=["symbol"], transformation="softplus"
-            ),
-            add_relative_time_idx=True,
-            add_target_scales=True,
-            add_encoder_length=True,
-            allow_missing_timesteps=True
-        )
+        # CRITICAL FIX: Handle reference normalization to prevent data leakage
+        if self.reference_datamodule and hasattr(self.reference_datamodule, 'train_dataset'):
+            print("🔒 NORMALIZATION CONSTRAINT: Using reference datamodule normalization parameters")
+            # Create dataset using reference normalization parameters
+            self.train_dataset = TimeSeriesDataSet.from_dataset(
+                self.reference_datamodule.train_dataset,
+                train_df,
+                predict=False,
+                stop_randomization=False
+            )
+        else:
+            # Create new training dataset with fresh normalization (for training data)
+            print("📊 Creating new normalization parameters from training data")
+            self.train_dataset = TimeSeriesDataSet(
+                train_df,
+                time_idx="time_idx",
+                target="target",
+                group_ids=["symbol"],
+                min_encoder_length=max(1, self.encoder_len // 4),  # More flexible minimum
+                max_encoder_length=self.encoder_len,
+                min_prediction_length=1,
+                max_prediction_length=self.predict_len,
+                static_categoricals=static_categoricals,
+                static_reals=static_reals,
+                time_varying_known_categoricals=time_varying_known_categoricals,
+                time_varying_known_reals=time_varying_known_reals,
+                time_varying_unknown_categoricals=[],  # None in our case
+                time_varying_unknown_reals=time_varying_unknown_reals,
+                target_normalizer=GroupNormalizer(
+                    groups=["symbol"], transformation="softplus"
+                ),
+                add_relative_time_idx=True,
+                add_target_scales=True,
+                add_encoder_length=True,
+                allow_missing_timesteps=True
+            )
         
         # Create validation dataset with error handling
         try:

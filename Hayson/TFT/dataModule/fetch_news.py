@@ -22,6 +22,7 @@ def fetch_news_embeddings(symbols: List[str], start: str, end: str,
                           api_key: Optional[str], embedding_dim: int = 768) -> pd.DataFrame:
     """
     For each symbol/date, fetch relevant news headlines/summaries and generate embeddings.
+    FIXED: No longer uses current datetime to determine data availability.
     
     Args:
         symbols: List of stock symbols
@@ -39,24 +40,28 @@ def fetch_news_embeddings(symbols: List[str], start: str, end: str,
         print("Warning: No API key provided, returning empty news data")
         return create_empty_news_df(symbols, start, end, embedding_dim)
     
-    # Check if dates are within NewsAPI's free tier limitations (last 30 days)
+    # FIXED: Check API limitations based on data period, not current time
     from datetime import datetime, timedelta
-    newsapi_cutoff = datetime.now() - timedelta(days=30)
     start_date = datetime.strptime(start, '%Y-%m-%d')
     end_date = datetime.strptime(end, '%Y-%m-%d')
     
-    if end_date < newsapi_cutoff:
-        print(f"📅 Warning: Requested dates ({start} to {end}) are older than NewsAPI free tier limit")
-        print(f"   NewsAPI free tier only allows access to news from the last 30 days")
-        print(f"   Returning zero embeddings for historical data compatibility")
-        return create_empty_news_df(symbols, start, end, embedding_dim)
+    # NewsAPI free tier limitations: 30 days of historical data
+    # Calculate this relative to the END of our data period, not current time
+    newsapi_historical_limit = 30  # days
+    earliest_available = end_date - timedelta(days=newsapi_historical_limit)
     
-    if start_date < newsapi_cutoff:
-        print(f"📅 Note: Start date {start} is older than NewsAPI limit, adjusting to recent dates")
-        start = newsapi_cutoff.strftime('%Y-%m-%d')
-        print(f"   Fetching news from {start} to {end} (recent data only)")
+    print(f"📅 Data period: {start} to {end}")
+    print(f"📅 NewsAPI free tier historical limit: {newsapi_historical_limit} days")
+    print(f"📅 Earliest available news date: {earliest_available.strftime('%Y-%m-%d')}")
     
-    print(f"   Using NewsAPI date range: {start} to {end}")
+    # Determine what portion of our data period has news available
+    if start_date < earliest_available:
+        print(f"⚠️  Note: {(earliest_available - start_date).days} days at start of period have no news data")
+        print(f"   News available from: {earliest_available.strftime('%Y-%m-%d')} to {end}")
+        news_start_date = earliest_available
+    else:
+        news_start_date = start_date
+        print(f"✅ Full period has news coverage: {start} to {end}")
     
     # Get cached FinBERT model for financial text embeddings
     model_name = "yiyanghkust/finbert-tone"
@@ -68,33 +73,29 @@ def fetch_news_embeddings(symbols: List[str], start: str, end: str,
     
     all_news_data = []
     
-    # Generate date range (original range for DataFrame structure)
-    original_start_date = datetime.strptime(start if start_date >= newsapi_cutoff else start, '%Y-%m-%d')
-    original_end_date = datetime.strptime(end, '%Y-%m-%d')
-    original_date_range = pd.date_range(start=original_start_date, end=original_end_date, freq='D')
+    # Generate complete date range for DataFrame structure
+    complete_date_range = pd.date_range(start=start_date, end=end_date, freq='D')
     
-    # Generate news-available date range (within API limits)
-    news_start_date = max(start_date, newsapi_cutoff)
-    news_end_date = end_date
-    news_date_range = pd.date_range(start=news_start_date, end=news_end_date, freq='D')
+    # Generate news-available date range  
+    news_date_range = pd.date_range(start=news_start_date, end=end_date, freq='D')
     
     for symbol in symbols:
         print(f"  Processing news for {symbol}...")
         
-        # Fetch news for this symbol (only for dates within API limits)
+        # Fetch news for this symbol (only for dates with API coverage)
         news_articles = []
         if news_date_range.size > 0:
             news_articles = fetch_news_for_symbol(
                 symbol, 
                 news_start_date.strftime('%Y-%m-%d'), 
-                news_end_date.strftime('%Y-%m-%d'), 
+                end_date.strftime('%Y-%m-%d'), 
                 api_key
             )
         
-        for date in original_date_range:
+        for date in complete_date_range:
             date_str = date.strftime('%Y-%m-%d')
             
-            # Check if this date has news available (within API limits)
+            # Check if this date has news available (within API limits for this period)
             if date >= news_start_date and news_articles:
                 # Get news for this specific date
                 daily_news = [
@@ -107,7 +108,7 @@ def fetch_news_embeddings(symbols: List[str], start: str, end: str,
                     daily_news, tokenizer, model, embedding_dim
                 )
             else:
-                # Use zero embedding for dates outside API limits
+                # Use zero embedding for dates outside API coverage for this period
                 embedding, sentiment = np.zeros(embedding_dim), 0.0
             
             # Create row data
@@ -129,6 +130,7 @@ def fetch_news_embeddings(symbols: List[str], start: str, end: str,
     
     news_df = pd.DataFrame(all_news_data)
     print(f"Generated news embeddings: {len(news_df)} rows with {embedding_dim} dimensions")
+    print(f"Coverage: {len(news_date_range)} days with news, {len(complete_date_range) - len(news_date_range)} days with zero embeddings")
     
     return news_df
 
