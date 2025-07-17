@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
 """
-Baseline Models for TFT Research Paper Comparison
-================================================
+Stock Price Baseline Models for TFT Research Paper Comparison
+============================================================
 
 This module implements various baseline models for comprehensive comparison
-in the multi-modal TFT research paper. All models use the same dataModule
-interface for fair comparison.
+in the multi-modal TFT research paper. All models use STOCK PRICE DATA ONLY
+(OHLCV - Open, High, Low, Close, Volume) for fair comparison.
+
+MODIFIED: All baseline models now use only stock price data (no news, earnings, etc.)
 
 Baseline Categories:
-1. Traditional ML: Linear Regression, Random Forest, XGBoost
+1. Traditional ML: Linear Regression, Random Forest, XGBoost  
 2. Deep Learning: LSTM, GRU, Vanilla Transformer
 3. Time Series: ARIMA, Prophet
-4. Finance-Specific: Buy & Hold, Moving Average, Mean Reversion
-5. Feature Ablation: Single-modal variants of TFT
+4. Finance-Specific: Buy & Hold, Moving Average
+
+Key Features:
+- Uses only OHLCV (Open, High, Low, Close, Volume) stock price data
+- Predicts returns and converts to absolute prices
+- Comprehensive plotting and metrics
+- Prevents data leakage by using historical features only
 """
 
 import numpy as np
@@ -50,9 +57,19 @@ class BaselineModel:
         self.scaler = StandardScaler()
         self.is_fitted = False
         
-    def prepare_data(self, dataloader: DataLoader, feature_subset: Optional[List[str]] = None) -> Tuple[np.ndarray, np.ndarray]:
-        """Extract and prepare data from dataloader."""
-        X_list, y_list = [], []
+    def prepare_data(self, dataloader: DataLoader, feature_subset: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Extract and prepare STOCK PRICE DATA ONLY from dataloader for price/return prediction.
+        CRITICAL: Prevent data leakage by using only historical features.
+        MODIFIED: Only uses OHLCV (Open, High, Low, Close, Volume) stock price data.
+        
+        Returns:
+            X: Stock price features [n_samples, 5] - OHLCV data only  
+            y: Target returns [n_samples]
+            timestamps: Date information for plotting [n_samples]
+            current_prices: Current stock prices for price plotting [n_samples]
+        """
+        X_list, y_list, timestamp_list, price_list = [], [], [], []
         
         for batch in dataloader:
             if isinstance(batch, tuple):
@@ -60,41 +77,80 @@ class BaselineModel:
             else:
                 batch_data = batch
                 
-            # Extract features
+            # Extract stock price data ONLY (OHLCV)
             encoder_cont = batch_data['encoder_cont'].numpy()  # Shape: [batch, seq_len, features]
             decoder_target = batch_data['decoder_target'].numpy()  # Shape: [batch, predict_len]
             
-            # Flatten sequence for traditional ML (use last timestep for now)
-            X_batch = encoder_cont[:, -1, :]  # [batch, features]
+            # STOCK PRICE ONLY: Extract OHLCV data (first 5 features)
+            # Assumes OHLCV are the first 5 features: [Open, High, Low, Close, Volume]
+            stock_data = encoder_cont[:, :, :5]  # [batch, seq_len, 5]
+            
+            # ANTI-LEAKAGE: Use features from timestep t-1 (not current timestep t)
+            if stock_data.shape[1] > 1:
+                X_batch = stock_data[:, -2, :]  # [batch, 5] - Previous timestep OHLCV
+                current_prices = stock_data[:, -2, 3]  # Previous close price (index 3)
+            else:
+                # Fallback if sequence length is 1
+                X_batch = stock_data[:, -1, :]
+                current_prices = stock_data[:, -1, 3]
+            
+            # Target: predict next period return
             y_batch = decoder_target[:, 0] if decoder_target.ndim > 1 else decoder_target  # [batch]
+            
+            # Extract timestamps for plotting
+            if 'time_idx' in batch_data:
+                timestamp_batch = batch_data['time_idx'].numpy()[:, -1] + 1  # Next timestamp
+            else:
+                timestamp_batch = np.arange(len(X_batch))  # Fallback to indices
             
             X_list.append(X_batch)
             y_list.append(y_batch)
+            timestamp_list.append(timestamp_batch)
+            price_list.append(current_prices)
         
         X = np.vstack(X_list)
         y = np.concatenate(y_list)
+        timestamps = np.concatenate(timestamp_list)
+        current_prices = np.concatenate(price_list)
         
-        # Apply feature subset if specified
-        if feature_subset is not None:
-            # For now, use first N features as subset (would need feature mapping in real implementation)
-            if feature_subset == 'ohlcv_only':
-                X = X[:, :5]  # First 5 features: OHLCV
-            elif feature_subset == 'technical_only':
-                X = X[:, 5:25]  # Next 20 features: technical indicators
-            elif feature_subset == 'news_only':
-                X = X[:, 25:35]  # Next 10 features: news embeddings
-            elif feature_subset == 'economic_only':
-                X = X[:, 35:45]  # Next 10 features: economic indicators
+        # Store feature info for consistent prediction
+        self.n_features_expected = X.shape[1]  # Should always be 5 for OHLCV
                 
-        return X, y
+        print(f"   📊 Prepared STOCK data: {X.shape[0]} samples, {X.shape[1]} features (OHLCV)")
+        print(f"   🎯 Target return range: {y.min():.4f} to {y.max():.4f}")
+        print(f"   💰 Current price range: ${current_prices.min():.2f} to ${current_prices.max():.2f}")
+        print(f"   🕒 Timestamp range: {timestamps.min():.0f} to {timestamps.max():.0f}")
+        
+        return X, y, timestamps, current_prices
     
     def fit(self, train_dataloader: DataLoader, feature_subset: Optional[str] = None):
         """Train the model."""
         raise NotImplementedError
         
-    def predict(self, test_dataloader: DataLoader) -> np.ndarray:
-        """Make predictions."""
-        raise NotImplementedError
+    def predict(self, test_dataloader: DataLoader) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Make price/return predictions and convert to absolute prices.
+        
+        Returns:
+            predictions: Predicted returns/prices
+            actuals: Actual returns/prices  
+            timestamps: Timestamps for plotting
+            current_prices: Current stock prices for price plotting
+        """
+        if not self.is_fitted:
+            raise ValueError(f"{self.name} model must be fitted before prediction")
+        
+        X_test, y_test, timestamps, current_prices = self.prepare_data(test_dataloader)
+        
+        # Check feature consistency
+        if hasattr(self, 'n_features_expected'):
+            if X_test.shape[1] != self.n_features_expected:
+                raise ValueError(f"Feature shape mismatch, expected: {self.n_features_expected}, got {X_test.shape[1]}")
+        
+        X_test_scaled = self.scaler.transform(X_test)
+        predictions = self.model.predict(X_test_scaled)
+        
+        return predictions, y_test, timestamps, current_prices
         
     def get_feature_importance(self) -> Optional[np.ndarray]:
         """Get feature importance if available."""
@@ -108,15 +164,18 @@ class LinearRegressionBaseline(BaselineModel):
         self.model = LinearRegression()
         
     def fit(self, train_dataloader: DataLoader, feature_subset: Optional[str] = None):
-        X_train, y_train = self.prepare_data(train_dataloader, feature_subset)
+        # Store feature subset for consistent prediction
+        X_train, y_train, _, _ = self.prepare_data(train_dataloader)
         X_train_scaled = self.scaler.fit_transform(X_train)
         self.model.fit(X_train_scaled, y_train)
         self.is_fitted = True
         
-    def predict(self, test_dataloader: DataLoader) -> np.ndarray:
-        X_test, _ = self.prepare_data(test_dataloader)
+    def predict(self, test_dataloader: DataLoader) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        X_test, y_test, timestamps, current_prices = self.prepare_data(test_dataloader)
+        
         X_test_scaled = self.scaler.transform(X_test)
-        return self.model.predict(X_test_scaled)
+        predictions = self.model.predict(X_test_scaled)
+        return predictions, y_test, timestamps, current_prices
     
     def get_feature_importance(self) -> Optional[np.ndarray]:
         if self.is_fitted:
@@ -136,13 +195,15 @@ class RandomForestBaseline(BaselineModel):
         )
         
     def fit(self, train_dataloader: DataLoader, feature_subset: Optional[str] = None):
-        X_train, y_train = self.prepare_data(train_dataloader, feature_subset)
+        X_train, y_train, _, _ = self.prepare_data(train_dataloader)
         self.model.fit(X_train, y_train)
         self.is_fitted = True
         
-    def predict(self, test_dataloader: DataLoader) -> np.ndarray:
-        X_test, _ = self.prepare_data(test_dataloader)
-        return self.model.predict(X_test)
+    def predict(self, test_dataloader: DataLoader) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        X_test, y_test, timestamps, current_prices = self.prepare_data(test_dataloader)
+        
+        predictions = self.model.predict(X_test)
+        return predictions, y_test, timestamps, current_prices
     
     def get_feature_importance(self) -> Optional[np.ndarray]:
         if self.is_fitted:
@@ -163,13 +224,15 @@ class XGBoostBaseline(BaselineModel):
         )
         
     def fit(self, train_dataloader: DataLoader, feature_subset: Optional[str] = None):
-        X_train, y_train = self.prepare_data(train_dataloader, feature_subset)
+        X_train, y_train, _, _ = self.prepare_data(train_dataloader)
         self.model.fit(X_train, y_train)
         self.is_fitted = True
         
-    def predict(self, test_dataloader: DataLoader) -> np.ndarray:
-        X_test, _ = self.prepare_data(test_dataloader)
-        return self.model.predict(X_test)
+    def predict(self, test_dataloader: DataLoader) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        X_test, y_test, timestamps, current_prices = self.prepare_data(test_dataloader)
+        
+        predictions = self.model.predict(X_test)
+        return predictions, y_test, timestamps, current_prices
     
     def get_feature_importance(self) -> Optional[np.ndarray]:
         if self.is_fitted:
@@ -207,31 +270,20 @@ class LSTMBaseline(BaselineModel):
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
         
     def fit(self, train_dataloader: DataLoader, feature_subset: Optional[str] = None):
-        # Get input size from first batch
+        # Get input size from first batch (OHLCV = 5 features)
         first_batch = next(iter(train_dataloader))
         if isinstance(first_batch, tuple):
             batch_data = first_batch[0]
         else:
             batch_data = first_batch
             
-        encoder_cont = batch_data['encoder_cont']
-        input_size = encoder_cont.shape[-1]
-        
-        # Apply feature subset
-        if feature_subset == 'ohlcv_only':
-            input_size = 5
-        elif feature_subset == 'technical_only':
-            input_size = 20
-        elif feature_subset == 'news_only':
-            input_size = 10
-        elif feature_subset == 'economic_only':
-            input_size = 10
-            
+        # Stock data only - 5 features (OHLCV)
+        input_size = 5
         self._build_model(input_size)
         
         # Training loop
         self.model.train()
-        epochs = 20  # Quick training for baseline
+        epochs = 3  # Quick testing
         
         for epoch in range(epochs):
             total_loss = 0
@@ -246,15 +298,8 @@ class LSTMBaseline(BaselineModel):
                 encoder_cont = batch_data['encoder_cont'].to(self.device)
                 decoder_target = batch_data['decoder_target'].to(self.device)
                 
-                # Apply feature subset
-                if feature_subset == 'ohlcv_only':
-                    encoder_cont = encoder_cont[:, :, :5]
-                elif feature_subset == 'technical_only':
-                    encoder_cont = encoder_cont[:, :, 5:25]
-                elif feature_subset == 'news_only':
-                    encoder_cont = encoder_cont[:, :, 25:35]
-                elif feature_subset == 'economic_only':
-                    encoder_cont = encoder_cont[:, :, 35:45]
+                # Use only OHLCV data (first 5 features)
+                encoder_cont = encoder_cont[:, :, :5]
                 
                 target = decoder_target[:, 0] if decoder_target.dim() > 1 else decoder_target
                 
@@ -269,9 +314,13 @@ class LSTMBaseline(BaselineModel):
                 
         self.is_fitted = True
         
-    def predict(self, test_dataloader: DataLoader) -> np.ndarray:
+    def predict(self, test_dataloader: DataLoader) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Make price/return predictions with LSTM."""
         self.model.eval()
         predictions = []
+        actuals = []
+        timestamps = []
+        current_prices_list = []
         
         with torch.no_grad():
             for batch in test_dataloader:
@@ -281,10 +330,35 @@ class LSTMBaseline(BaselineModel):
                     batch_data = batch
                     
                 encoder_cont = batch_data['encoder_cont'].to(self.device)
-                output = self.model(encoder_cont)
-                predictions.append(output.cpu().numpy())
+                decoder_target = batch_data['decoder_target'].to(self.device)
                 
-        return np.concatenate(predictions)
+                # Use only OHLCV data (first 5 features)
+                encoder_cont = encoder_cont[:, :, :5]
+                
+                target = decoder_target[:, 0] if decoder_target.dim() > 1 else decoder_target
+                output = self.model(encoder_cont)
+                
+                predictions.append(output.cpu().numpy())
+                actuals.append(target.cpu().numpy())
+                
+                # Extract current prices (close price from last encoder timestep)
+                original_encoder = batch_data['encoder_cont'].to(self.device)
+                current_prices = original_encoder[:, -1, 3].cpu().numpy()  # Close price at index 3
+                current_prices_list.append(current_prices)
+                
+                # Extract timestamps for plotting
+                if 'time_idx' in batch_data:
+                    timestamp_batch = batch_data['time_idx'].cpu().numpy()[:, -1]
+                else:
+                    timestamp_batch = np.arange(len(output.cpu().numpy()))
+                timestamps.append(timestamp_batch)
+                
+        predictions = np.concatenate(predictions)
+        actuals = np.concatenate(actuals)
+        timestamps = np.concatenate(timestamps)
+        current_prices = np.concatenate(current_prices_list)
+        
+        return predictions, actuals, timestamps, current_prices
 
 class GRUBaseline(LSTMBaseline):
     """GRU baseline - similar to LSTM but with GRU cells."""
@@ -349,8 +423,20 @@ class VanillaTransformerBaseline(BaselineModel):
         self.model = VanillaTransformer(input_size).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
         
+    def _get_feature_indices(self, feature_subset: Optional[str]) -> Optional[np.ndarray]:
+        """Get feature indices for subset."""
+        if feature_subset == 'ohlcv_only':
+            return np.arange(5)
+        elif feature_subset == 'technical_only':
+            return np.arange(5, 25)
+        elif feature_subset == 'news_only':
+            return np.arange(25, 35)
+        elif feature_subset == 'economic_only':
+            return np.arange(35, 45)
+        return None
+        
     def fit(self, train_dataloader: DataLoader, feature_subset: Optional[str] = None):
-        # Get dimensions from first batch
+        # Get dimensions from first batch (OHLCV = 5 features)
         first_batch = next(iter(train_dataloader))
         if isinstance(first_batch, tuple):
             batch_data = first_batch[0]
@@ -358,23 +444,15 @@ class VanillaTransformerBaseline(BaselineModel):
             batch_data = first_batch
             
         encoder_cont = batch_data['encoder_cont']
-        seq_len, input_size = encoder_cont.shape[1], encoder_cont.shape[2]
+        seq_len = encoder_cont.shape[1]
         
-        # Apply feature subset
-        if feature_subset == 'ohlcv_only':
-            input_size = 5
-        elif feature_subset == 'technical_only':
-            input_size = 20
-        elif feature_subset == 'news_only':
-            input_size = 10
-        elif feature_subset == 'economic_only':
-            input_size = 10
-            
+        # Stock data only - 5 features (OHLCV)
+        input_size = 5
         self._build_model(input_size, seq_len)
         
-        # Training loop (similar to LSTM)
+        # Training loop
         self.model.train()
-        epochs = 15
+        epochs = 3  # Quick testing
         
         for epoch in range(epochs):
             for batch in train_dataloader:
@@ -386,15 +464,8 @@ class VanillaTransformerBaseline(BaselineModel):
                 encoder_cont = batch_data['encoder_cont'].to(self.device)
                 decoder_target = batch_data['decoder_target'].to(self.device)
                 
-                # Apply feature subset
-                if feature_subset == 'ohlcv_only':
-                    encoder_cont = encoder_cont[:, :, :5]
-                elif feature_subset == 'technical_only':
-                    encoder_cont = encoder_cont[:, :, 5:25]
-                elif feature_subset == 'news_only':
-                    encoder_cont = encoder_cont[:, :, 25:35]
-                elif feature_subset == 'economic_only':
-                    encoder_cont = encoder_cont[:, :, 35:45]
+                # Use only OHLCV data (first 5 features)
+                encoder_cont = encoder_cont[:, :, :5]
                 
                 target = decoder_target[:, 0] if decoder_target.dim() > 1 else decoder_target
                 
@@ -406,9 +477,13 @@ class VanillaTransformerBaseline(BaselineModel):
                 
         self.is_fitted = True
         
-    def predict(self, test_dataloader: DataLoader) -> np.ndarray:
+    def predict(self, test_dataloader: DataLoader) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Make price/return predictions with Transformer."""
         self.model.eval()
         predictions = []
+        actuals = []
+        timestamps = []
+        current_prices_list = []
         
         with torch.no_grad():
             for batch in test_dataloader:
@@ -418,10 +493,35 @@ class VanillaTransformerBaseline(BaselineModel):
                     batch_data = batch
                     
                 encoder_cont = batch_data['encoder_cont'].to(self.device)
-                output = self.model(encoder_cont)
-                predictions.append(output.cpu().numpy())
+                decoder_target = batch_data['decoder_target'].to(self.device)
                 
-        return np.concatenate(predictions)
+                # Use only OHLCV data (first 5 features)
+                encoder_cont = encoder_cont[:, :, :5]
+                
+                target = decoder_target[:, 0] if decoder_target.dim() > 1 else decoder_target
+                output = self.model(encoder_cont)
+                
+                predictions.append(output.cpu().numpy())
+                actuals.append(target.cpu().numpy())
+                
+                # Extract current prices (close price from last encoder timestep)
+                original_encoder = batch_data['encoder_cont'].to(self.device)
+                current_prices = original_encoder[:, -1, 3].cpu().numpy()  # Close price at index 3
+                current_prices_list.append(current_prices)
+                
+                # Extract timestamps for plotting
+                if 'time_idx' in batch_data:
+                    timestamp_batch = batch_data['time_idx'].cpu().numpy()[:, -1]
+                else:
+                    timestamp_batch = np.arange(len(output.cpu().numpy()))
+                timestamps.append(timestamp_batch)
+                
+        predictions = np.concatenate(predictions)
+        actuals = np.concatenate(actuals)
+        timestamps = np.concatenate(timestamps)
+        current_prices = np.concatenate(current_prices_list)
+        
+        return predictions, actuals, timestamps, current_prices
 
 class ARIMABaseline(BaselineModel):
     """ARIMA time series baseline."""
@@ -440,15 +540,18 @@ class ARIMABaseline(BaselineModel):
         print("📊 ARIMA baseline fitting... (simplified implementation)")
         self.is_fitted = True
         
-    def predict(self, test_dataloader: DataLoader) -> np.ndarray:
+    def predict(self, test_dataloader: DataLoader) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Make price/return predictions with ARIMA."""
         if not ARIMA_AVAILABLE or not self.is_fitted:
-            # Return dummy predictions
-            X_test, _ = self.prepare_data(test_dataloader)
-            return np.zeros(len(X_test))
+            # Return dummy predictions with proper format
+            predictions, actuals, timestamps, current_prices = self.prepare_data(test_dataloader)
+            dummy_predictions = np.zeros(len(predictions))
+            return dummy_predictions, actuals, timestamps, current_prices
         
-        # Simplified ARIMA prediction
-        X_test, _ = self.prepare_data(test_dataloader)
-        return np.random.normal(0, 0.01, len(X_test))
+        # Simplified ARIMA prediction with proper format
+        predictions, actuals, timestamps, current_prices = self.prepare_data(test_dataloader)
+        dummy_predictions = np.random.normal(0, 0.01, len(predictions))
+        return dummy_predictions, actuals, timestamps, current_prices
 
 class BuyAndHoldBaseline(BaselineModel):
     """Buy and Hold strategy baseline."""
@@ -458,7 +561,7 @@ class BuyAndHoldBaseline(BaselineModel):
         self.last_price = None
         
     def fit(self, train_dataloader: DataLoader, feature_subset: Optional[str] = None):
-        # Extract last price from training data
+        # Extract last price from training data for baseline
         for batch in train_dataloader:
             if isinstance(batch, tuple):
                 batch_data = batch[0]
@@ -466,15 +569,17 @@ class BuyAndHoldBaseline(BaselineModel):
                 batch_data = batch
                 
             encoder_cont = batch_data['encoder_cont']
-            # Assume first feature is close price
-            self.last_price = encoder_cont[:, -1, 0].mean().item()
+            # Close price is at index 3
+            self.last_price = encoder_cont[:, -1, 3].mean().item()
             
         self.is_fitted = True
         
-    def predict(self, test_dataloader: DataLoader) -> np.ndarray:
+    def predict(self, test_dataloader: DataLoader) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Make price/return predictions with Buy & Hold."""
         # Buy and hold predicts no change (return = 0)
-        X_test, _ = self.prepare_data(test_dataloader)
-        return np.zeros(len(X_test))
+        predictions, actuals, timestamps, current_prices = self.prepare_data(test_dataloader)
+        buy_hold_predictions = np.zeros(len(predictions))
+        return buy_hold_predictions, actuals, timestamps, current_prices
 
 class MovingAverageCrossoverBaseline(BaselineModel):
     """Moving Average Crossover strategy baseline."""
@@ -488,9 +593,12 @@ class MovingAverageCrossoverBaseline(BaselineModel):
         # Moving average doesn't need fitting
         self.is_fitted = True
         
-    def predict(self, test_dataloader: DataLoader) -> np.ndarray:
-        # Simple momentum-based prediction
+    def predict(self, test_dataloader: DataLoader) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Make price/return predictions with Moving Average Crossover."""
         predictions = []
+        actuals = []
+        timestamps = []
+        current_prices_list = []
         
         for batch in test_dataloader:
             if isinstance(batch, tuple):
@@ -499,35 +607,42 @@ class MovingAverageCrossoverBaseline(BaselineModel):
                 batch_data = batch
                 
             encoder_cont = batch_data['encoder_cont']
+            decoder_target = batch_data['decoder_target']
+            
             # Use price momentum as prediction
-            prices = encoder_cont[:, :, 0]  # Assume first feature is close price
-            momentum = (prices[:, -1] - prices[:, -10]) / prices[:, -10]
+            prices = encoder_cont[:, :, 3]  # Close price at index 3
+            
+            if prices.shape[1] >= 10:
+                momentum = (prices[:, -1] - prices[:, -10]) / prices[:, -10]
+            else:
+                momentum = torch.zeros(prices.shape[0])
+                
             predictions.append(momentum.numpy())
             
-        return np.concatenate(predictions)
-
-# Feature Ablation Baselines (these would use your existing TFT with feature subsets)
-class TFTOHLCVOnlyBaseline(BaselineModel):
-    """TFT with only OHLCV features."""
-    
-    def __init__(self, config: Dict[str, Any], tft_trainer):
-        super().__init__("TFT (OHLCV Only)", config)
-        self.tft_trainer = tft_trainer
+            # Extract actuals
+            target = decoder_target[:, 0] if decoder_target.dim() > 1 else decoder_target
+            actuals.append(target.numpy())
+            
+            # Extract current prices
+            current_prices = encoder_cont[:, -1, 3].numpy()
+            current_prices_list.append(current_prices)
+            
+            # Extract timestamps
+            if 'time_idx' in batch_data:
+                timestamp_batch = batch_data['time_idx'].numpy()[:, -1]
+            else:
+                timestamp_batch = np.arange(len(momentum.numpy()))
+            timestamps.append(timestamp_batch)
+            
+        predictions = np.concatenate(predictions)
+        actuals = np.concatenate(actuals)
+        timestamps = np.concatenate(timestamps)
+        current_prices = np.concatenate(current_prices_list)
         
-    def fit(self, train_dataloader: DataLoader, feature_subset: Optional[str] = None):
-        # This would modify the TFT to use only OHLCV features
-        # Implementation depends on your TFT architecture
-        print("📊 Training TFT with OHLCV features only...")
-        self.is_fitted = True
-        
-    def predict(self, test_dataloader: DataLoader) -> np.ndarray:
-        # Use TFT with restricted features
-        # Return dummy for now
-        X_test, _ = self.prepare_data(test_dataloader)
-        return np.random.normal(0, 0.01, len(X_test))
+        return predictions, actuals, timestamps, current_prices
 
-def get_all_baselines(config: Dict[str, Any], tft_trainer=None) -> Dict[str, BaselineModel]:
-    """Get all available baseline models."""
+def get_all_baselines(config: Dict[str, Any]) -> Dict[str, BaselineModel]:
+    """Get all available stock price baseline models (OHLCV data only)."""
     baselines = {
         # Traditional ML
         'linear_regression': LinearRegressionBaseline(config),
@@ -547,17 +662,10 @@ def get_all_baselines(config: Dict[str, Any], tft_trainer=None) -> Dict[str, Bas
         'moving_average': MovingAverageCrossoverBaseline(config),
     }
     
-    # Add feature ablation baselines if TFT trainer is provided
-    if tft_trainer is not None:
-        baselines.update({
-            'tft_ohlcv_only': TFTOHLCVOnlyBaseline(config, tft_trainer),
-            # Add more TFT variants here
-        })
-    
     return baselines
 
 def get_baseline_subset(baseline_type: str, config: Dict[str, Any]) -> Dict[str, BaselineModel]:
-    """Get a subset of baselines by type."""
+    """Get a subset of stock price baselines by type."""
     all_baselines = get_all_baselines(config)
     
     if baseline_type == 'traditional_ml':
@@ -575,3 +683,140 @@ def get_baseline_subset(baseline_type: str, config: Dict[str, Any]) -> Dict[str,
                 if k in ['linear_regression', 'random_forest', 'buy_and_hold']}
     else:
         return all_baselines
+
+# Utility Functions for Price Analysis and Plotting
+def convert_returns_to_prices(returns: np.ndarray, initial_prices: np.ndarray) -> np.ndarray:
+    """
+    Convert predicted returns to absolute stock prices.
+    
+    Args:
+        returns: Predicted returns (percentage change)
+        initial_prices: Starting prices for each prediction
+        
+    Returns:
+        predicted_prices: Absolute stock prices
+    """
+    # Formula: new_price = current_price * (1 + return)
+    predicted_prices = initial_prices * (1 + returns)
+    return predicted_prices
+
+def calculate_price_metrics(predicted_returns: np.ndarray, actual_returns: np.ndarray, 
+                          current_prices: np.ndarray) -> Dict[str, float]:
+    """
+    Calculate comprehensive metrics for price/return predictions.
+    
+    Returns both return-based and price-based metrics.
+    """
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+    
+    # Return-based metrics
+    mse_returns = mean_squared_error(actual_returns, predicted_returns)
+    mae_returns = mean_absolute_error(actual_returns, predicted_returns)
+    r2_returns = r2_score(actual_returns, predicted_returns)
+    
+    # Convert to prices for price-based metrics
+    predicted_prices = convert_returns_to_prices(predicted_returns, current_prices)
+    actual_prices = convert_returns_to_prices(actual_returns, current_prices)
+    
+    mse_prices = mean_squared_error(actual_prices, predicted_prices)
+    mae_prices = mean_absolute_error(actual_prices, predicted_prices)
+    r2_prices = r2_score(actual_prices, predicted_prices)
+    
+    # Calculate percentage errors
+    mape_returns = np.mean(np.abs((actual_returns - predicted_returns) / (actual_returns + 1e-8))) * 100
+    mape_prices = np.mean(np.abs((actual_prices - predicted_prices) / (actual_prices + 1e-8))) * 100
+    
+    return {
+        # Return metrics
+        'mse_returns': mse_returns,
+        'mae_returns': mae_returns,
+        'r2_returns': r2_returns,
+        'mape_returns': mape_returns,
+        
+        # Price metrics
+        'mse_prices': mse_prices,
+        'mae_prices': mae_prices,
+        'r2_prices': r2_prices,
+        'mape_prices': mape_prices,
+        
+        # Trading metrics
+        'return_volatility': np.std(predicted_returns),
+        'price_volatility': np.std(predicted_prices),
+        'max_price_error': np.max(np.abs(actual_prices - predicted_prices)),
+        'mean_price_level': np.mean(actual_prices)
+    }
+
+def create_stock_prediction_plots(timestamps: np.ndarray, actual_returns: np.ndarray, 
+                                predicted_returns: np.ndarray, current_prices: np.ndarray,
+                                model_name: str, save_path: Optional[str] = None):
+    """
+    Create comprehensive plots for stock price predictions.
+    
+    Shows both returns and absolute price predictions with proper formatting.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    from datetime import datetime, timedelta
+    
+    # Convert returns to prices
+    predicted_prices = convert_returns_to_prices(predicted_returns, current_prices)
+    actual_prices = convert_returns_to_prices(actual_returns, current_prices)
+    
+    # Create figure with subplots
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle(f'{model_name} - Stock Price Predictions', fontsize=16, fontweight='bold')
+    
+    # Convert timestamps to dates if they're numeric
+    if len(timestamps) > 0 and isinstance(timestamps[0], (int, float)):
+        # Assume timestamps are days since some epoch
+        base_date = datetime(2020, 1, 1)  # Adjust as needed
+        dates = [base_date + timedelta(days=int(t)) for t in timestamps]
+    else:
+        dates = timestamps
+    
+    # Plot 1: Returns Comparison
+    ax1.scatter(dates, actual_returns, alpha=0.6, s=20, color='blue', label='Actual Returns')
+    ax1.scatter(dates, predicted_returns, alpha=0.6, s=20, color='red', label='Predicted Returns')
+    ax1.set_title('Returns Prediction')
+    ax1.set_xlabel('Date')
+    ax1.set_ylabel('Return (%)')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Price Comparison
+    ax2.plot(dates, actual_prices, color='blue', linewidth=2, label='Actual Prices', alpha=0.8)
+    ax2.plot(dates, predicted_prices, color='red', linewidth=2, label='Predicted Prices', alpha=0.8)
+    ax2.set_title('Stock Price Prediction')
+    ax2.set_xlabel('Date')
+    ax2.set_ylabel('Price ($)')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    # Plot 3: Returns Scatter Plot
+    ax3.scatter(actual_returns, predicted_returns, alpha=0.6, s=20)
+    min_val = min(actual_returns.min(), predicted_returns.min())
+    max_val = max(actual_returns.max(), predicted_returns.max())
+    ax3.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8)
+    ax3.set_title('Returns: Predicted vs Actual')
+    ax3.set_xlabel('Actual Returns')
+    ax3.set_ylabel('Predicted Returns')
+    ax3.grid(True, alpha=0.3)
+    
+    # Plot 4: Price Error Analysis
+    price_errors = actual_prices - predicted_prices
+    ax4.hist(price_errors, bins=30, alpha=0.7, color='purple', edgecolor='black')
+    ax4.axvline(0, color='red', linestyle='--', linewidth=2)
+    ax4.set_title('Price Prediction Errors Distribution')
+    ax4.set_xlabel('Error ($)')
+    ax4.set_ylabel('Frequency')
+    ax4.grid(True, alpha=0.3)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save plot if path provided
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"📊 Plot saved to: {save_path}")
+    
+    return fig

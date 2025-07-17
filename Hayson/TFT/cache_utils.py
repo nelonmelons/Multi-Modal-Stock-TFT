@@ -11,7 +11,6 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from cache_manager import get_cache_instance, clear_all_cache, print_cache_info
 
-
 def main():
     """Main function for cache management CLI."""
     parser = argparse.ArgumentParser(description='Manage TFT pipeline cache')
@@ -42,7 +41,6 @@ def main():
     
     # If no specific action, show help
     parser.print_help()
-
 
 if __name__ == '__main__':
     main()

@@ -226,12 +226,7 @@ class TFTTrainer:
             print(f"   ✅ No symbol overlap: train ({len(train_symbols)}) and val ({len(val_symbols)}) are disjoint")
         
         print("✅ Data leakage validation completed!")
-    
 
-
-
-
-    
     def load_test_data(self) -> Tuple[Optional[DataLoader], Optional[Any]]:
         """Load test data for out-of-sample validation."""
         if not self.config.get('out_of_sample') or not self.config.get('test_symbol'):
