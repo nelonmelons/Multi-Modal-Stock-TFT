@@ -52,6 +52,8 @@ import pandas as pd
 import warnings
 import traceback
 import argparse
+import traceback
+import argparse
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Any, Optional
 import matplotlib.pyplot as plt
@@ -59,11 +61,25 @@ from pathlib import Path
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, accuracy_score, balanced_accuracy_score, f1_score, roc_auc_score
 
 # Setup paths and suppress warnings
 warnings.filterwarnings('ignore')
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+        print(f"✅ Loaded environment variables from {env_path}")
+    else:
+        print(f"ℹ️  No .env file found at {env_path}")
+        print("   You can create one to set API keys automatically")
+except ImportError:
+    print("⚠️  python-dotenv not installed. Install with: pip install python-dotenv")
+    print("   API keys will need to be set manually or via system environment variables")
 
 try:
     import xgboost as xgb
@@ -556,7 +572,7 @@ class FixedBaselineRunner:
     def calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray, 
                          current_prices: np.ndarray) -> Dict[str, float]:
         """
-        Calculate comprehensive prediction metrics for multi-step predictions.
+        Calculate comprehensive prediction metrics including Classification, Regression, and Financial metrics.
         
         Args:
             y_true: True returns [n_samples, predict_len]
@@ -568,29 +584,44 @@ class FixedBaselineRunner:
             y_true_flat = y_true.flatten()
             y_pred_flat = y_pred.flatten()
             
-            # Return-based metrics (overall)
-            mse_returns = mean_squared_error(y_true_flat, y_pred_flat)
+            # === REGRESSION METRICS ===
+            # MAE, RMSE, MAPE, R²
             mae_returns = mean_absolute_error(y_true_flat, y_pred_flat)
+            rmse_returns = np.sqrt(mean_squared_error(y_true_flat, y_pred_flat))
             r2_returns = r2_score(y_true_flat, y_pred_flat)
+            mape_returns = np.mean(np.abs((y_true_flat - y_pred_flat) / (np.abs(y_true_flat) + 1e-8))) * 100
             
-            # Calculate step-wise metrics
-            step_metrics = {}
-            predict_len = y_true.shape[1]
+            # === CLASSIFICATION METRICS (TREND PREDICTION) ===
+            # Convert returns to binary classification (up/down trend)
+            y_true_binary = (y_true_flat > 0).astype(int)
+            y_pred_binary = (y_pred_flat > 0).astype(int)
             
-            for step in range(predict_len):
-                step_true = y_true[:, step]
-                step_pred = y_pred[:, step]
-                
-                step_metrics[f'mse_step_{step+1}'] = float(mean_squared_error(step_true, step_pred))
-                step_metrics[f'mae_step_{step+1}'] = float(mean_absolute_error(step_true, step_pred))
-                step_metrics[f'r2_step_{step+1}'] = float(r2_score(step_true, step_pred))
+            # Calculate classification metrics
+            accuracy = accuracy_score(y_true_binary, y_pred_binary)
+            balanced_accuracy = balanced_accuracy_score(y_true_binary, y_pred_binary)
             
-            # Price reconstruction for multi-step predictions
+            # F1-Score (handle case where one class is missing)
+            try:
+                f1_score_val = f1_score(y_true_binary, y_pred_binary, average='binary')
+            except:
+                f1_score_val = 0.0
+            
+            # AUC-ROC (use predicted returns as probabilities after normalization)
+            try:
+                # Normalize predictions to [0,1] range for ROC calculation
+                y_pred_normalized = (y_pred_flat - y_pred_flat.min()) / (y_pred_flat.max() - y_pred_flat.min() + 1e-8)
+                auc_roc = roc_auc_score(y_true_binary, y_pred_normalized)
+            except:
+                auc_roc = 0.5  # Random performance
+            
+            # === FINANCIAL METRICS ===
+            # Price reconstruction for financial metrics
             predicted_prices_sequences = []
             actual_prices_sequences = []
             
+            predict_len = y_true.shape[1]
+            
             for i in range(len(y_true)):
-                # For each sequence, reconstruct the price path
                 start_price = current_prices[i]
                 
                 pred_prices = [start_price]
@@ -600,34 +631,10 @@ class FixedBaselineRunner:
                     pred_prices.append(pred_prices[-1] * (1 + y_pred[i, step]))
                     actual_prices.append(actual_prices[-1] * (1 + y_true[i, step]))
                 
-                predicted_prices_sequences.append(pred_prices[1:])  # Remove starting price
-                actual_prices_sequences.append(actual_prices[1:])   # Remove starting price
+                predicted_prices_sequences.append(pred_prices[1:])
+                actual_prices_sequences.append(actual_prices[1:])
             
-            # Flatten price sequences for overall metrics
-            predicted_prices_flat = np.array(predicted_prices_sequences).flatten()
-            actual_prices_flat = np.array(actual_prices_sequences).flatten()
-            
-            # Price-based metrics
-            mse_prices = mean_squared_error(actual_prices_flat, predicted_prices_flat)
-            mae_prices = mean_absolute_error(actual_prices_flat, predicted_prices_flat)
-            r2_prices = r2_score(actual_prices_flat, predicted_prices_flat)
-            
-            # Calculate percentage errors with protection against division by zero
-            mape_returns = np.mean(np.abs((y_true_flat - y_pred_flat) / (np.abs(y_true_flat) + 1e-8))) * 100
-            mape_prices = np.mean(np.abs((actual_prices_flat - predicted_prices_flat) / (actual_prices_flat + 1e-8))) * 100
-            
-            # Directional accuracy for each step
-            overall_directional_accuracy = 0
-            for step in range(predict_len):
-                actual_directions = np.sign(y_true[:, step])
-                predicted_directions = np.sign(y_pred[:, step])
-                step_acc = np.mean(actual_directions == predicted_directions) * 100
-                step_metrics[f'directional_accuracy_step_{step+1}'] = float(step_acc)
-                overall_directional_accuracy += step_acc
-            
-            overall_directional_accuracy /= predict_len
-            
-            # Multi-step cumulative return accuracy
+            # Calculate cumulative returns for the prediction period
             cumulative_actual_returns = []
             cumulative_predicted_returns = []
             
@@ -637,45 +644,103 @@ class FixedBaselineRunner:
                 cumulative_actual_returns.append(cum_actual)
                 cumulative_predicted_returns.append(cum_pred)
             
-            cumulative_return_error = np.mean(np.abs(np.array(cumulative_actual_returns) - np.array(cumulative_predicted_returns)))
+            # Average cumulative returns
+            avg_actual_return = np.mean(cumulative_actual_returns)
+            avg_predicted_return = np.mean(cumulative_predicted_returns)
             
-            base_metrics = {
-                # Overall return-based metrics
-                'mse_returns': float(mse_returns),
+            # Annualized Return (assuming predict_len is in days)
+            # Simple annualization: (1 + return)^(252/days) - 1
+            days_in_prediction = predict_len
+            annualized_actual_return = (1 + avg_actual_return) ** (252 / days_in_prediction) - 1
+            annualized_predicted_return = (1 + avg_predicted_return) ** (252 / days_in_prediction) - 1
+            
+            # Sharpe Ratio (using predicted returns volatility)
+            returns_volatility = np.std(y_pred_flat)
+            annualized_volatility = returns_volatility * np.sqrt(252)
+            
+            # Assume risk-free rate of 3% (0.03)
+            risk_free_rate = 0.03
+            sharpe_ratio = (annualized_predicted_return - risk_free_rate) / (annualized_volatility + 1e-8)
+            
+            # Maximum Drawdown (MDD) - calculate from price sequences
+            def calculate_mdd(price_sequences):
+                if not price_sequences:
+                    return 0.0
+                
+                max_drawdowns = []
+                for prices in price_sequences:
+                    if len(prices) == 0:
+                        continue
+                    
+                    # Calculate running maximum
+                    running_max = np.maximum.accumulate(prices)
+                    # Calculate drawdown at each point
+                    drawdown = (prices - running_max) / running_max
+                    # Maximum drawdown is the most negative value
+                    max_drawdown = np.min(drawdown)
+                    max_drawdowns.append(max_drawdown)
+                
+                return np.mean(max_drawdowns) if max_drawdowns else 0.0
+            
+            mdd_actual = calculate_mdd(actual_prices_sequences)
+            mdd_predicted = calculate_mdd(predicted_prices_sequences)
+            
+            # Price-based regression metrics for completeness
+            predicted_prices_flat = np.array(predicted_prices_sequences).flatten()
+            actual_prices_flat = np.array(actual_prices_sequences).flatten()
+            
+            mae_prices = mean_absolute_error(actual_prices_flat, predicted_prices_flat)
+            rmse_prices = np.sqrt(mean_squared_error(actual_prices_flat, predicted_prices_flat))
+            r2_prices = r2_score(actual_prices_flat, predicted_prices_flat)
+            mape_prices = np.mean(np.abs((actual_prices_flat - predicted_prices_flat) / (actual_prices_flat + 1e-8))) * 100
+            
+            # Compile all metrics
+            metrics = {
+                # === REGRESSION METRICS ===
                 'mae_returns': float(mae_returns),
+                'rmse_returns': float(rmse_returns),
                 'r2_returns': float(r2_returns),
                 'mape_returns': float(mape_returns),
                 
-                # Overall price-based metrics
-                'mse_prices_corrected': float(mse_prices),
-                'mae_prices_corrected': float(mae_prices),
-                'r2_prices_corrected': float(r2_prices),
-                'mape_prices_corrected': float(mape_prices),
+                # Price-based regression metrics
+                'mae_prices': float(mae_prices),
+                'rmse_prices': float(rmse_prices),
+                'r2_prices': float(r2_prices),
+                'mape_prices': float(mape_prices),
+                
+                # === CLASSIFICATION METRICS ===
+                'accuracy': float(accuracy),
+                'balanced_accuracy': float(balanced_accuracy),
+                'f1_score': float(f1_score_val),
+                'auc_roc': float(auc_roc),
+                
+                # === FINANCIAL METRICS ===
+                'annualized_return_actual': float(annualized_actual_return),
+                'annualized_return_predicted': float(annualized_predicted_return),
+                'sharpe_ratio': float(sharpe_ratio),
+                'mdd_actual': float(mdd_actual),
+                'mdd_predicted': float(mdd_predicted),
+                'cumulative_return_actual': float(avg_actual_return),
+                'cumulative_return_predicted': float(avg_predicted_return),
                 
                 # Additional useful metrics
-                'return_volatility': float(np.std(y_pred_flat)),
-                'price_volatility_corrected': float(np.std(predicted_prices_flat)),
-                'cumulative_return_error': float(cumulative_return_error),
-                'directional_accuracy': float(overall_directional_accuracy),
-                'cumulative_actual_return': float(np.mean(cumulative_actual_returns)),
-                'cumulative_predicted_return': float(np.mean(cumulative_predicted_returns)),
-                'predict_len': predict_len,
+                'volatility_actual': float(np.std(y_true_flat)),
+                'volatility_predicted': float(np.std(y_pred_flat)),
+                'predict_len': int(predict_len),
             }
             
-            # Combine base metrics with step-wise metrics
-            base_metrics.update(step_metrics)
-            return base_metrics
+            return metrics
             
         except Exception as e:
             print(f"⚠️ Error calculating metrics: {e}")
             return {
-                'mse_returns': np.inf, 'mae_returns': np.inf, 'r2_returns': -np.inf,
-                'mape_returns': np.inf, 'mse_prices_corrected': np.inf, 'mae_prices_corrected': np.inf,
-                'r2_prices_corrected': -np.inf, 'mape_prices_corrected': np.inf,
-                'return_volatility': 0.0, 'price_volatility_corrected': 0.0,
-                'cumulative_return_error': np.inf, 'directional_accuracy': 0.0,
-                'cumulative_actual_return': 0.0, 'cumulative_predicted_return': 0.0,
-                'predict_len': 1,
+                'mae_returns': np.inf, 'rmse_returns': np.inf, 'r2_returns': -np.inf, 'mape_returns': np.inf,
+                'mae_prices': np.inf, 'rmse_prices': np.inf, 'r2_prices': -np.inf, 'mape_prices': np.inf,
+                'accuracy': 0.0, 'balanced_accuracy': 0.0, 'f1_score': 0.0, 'auc_roc': 0.5,
+                'annualized_return_actual': 0.0, 'annualized_return_predicted': 0.0,
+                'sharpe_ratio': 0.0, 'mdd_actual': 0.0, 'mdd_predicted': 0.0,
+                'cumulative_return_actual': 0.0, 'cumulative_return_predicted': 0.0,
+                'volatility_actual': 0.0, 'volatility_predicted': 0.0, 'predict_len': 1,
             }
     
     def train_and_evaluate_symbol(self, train_datamodule: Any, val_datamodule: Any, symbol: str, 
@@ -782,14 +847,10 @@ class FixedBaselineRunner:
                         'prediction_type': f"{predict_len}-step",
                     }
                     
-                    print(f"✅ {model_name} ({predict_len}-step) - R²: {metrics['r2_returns']:.4f}, MAE: {metrics['mae_returns']:.4f}")
-                    print(f"   📊 Price R²: {metrics['r2_prices_corrected']:.4f}, MAE: ${metrics['mae_prices_corrected']:.2f}")
-                    print(f"   📊 Directional Accuracy: {metrics['directional_accuracy']:.1f}%")
-                    
-                    # Print step-wise performance
-                    for step in range(predict_len):
-                        r2_step = metrics.get(f'r2_step_{step+1}', 0)
-                        print(f"   📈 Step {step+1}: R²={r2_step:.4f}")
+                    print(f"✅ {model_name} ({predict_len}-step):")
+                    print(f"   📊 Classification - Accuracy: {metrics['accuracy']:.3f}, F1: {metrics['f1_score']:.3f}, AUC: {metrics['auc_roc']:.3f}")
+                    print(f"   📊 Regression - MAE: {metrics['mae_returns']:.4f}, RMSE: {metrics['rmse_returns']:.4f}, R²: {metrics['r2_returns']:.4f}")
+                    print(f"   � Financial - Sharpe: {metrics['sharpe_ratio']:.3f}, Ann. Return: {metrics['annualized_return_predicted']:.3f}")
                     
                 except Exception as e:
                     print(f"❌ {model_name} failed for {symbol}: {e}")
@@ -804,7 +865,7 @@ class FixedBaselineRunner:
             return
     
     def create_symbol_plots(self, symbol: str):
-        """Create plots for a specific symbol with properly aligned multi-step predictions."""
+        """Create plots for a specific symbol showing Classification, Regression, Financial metrics, and Price Comparisons."""
         if symbol not in self.results or len(self.results[symbol]) == 0:
             print(f"⚠️ No results to plot for {symbol}")
             return
@@ -815,246 +876,148 @@ class FixedBaselineRunner:
         n_models = len(symbol_results)
         
         try:
-            # Create subplots for each model (3 plots per model for multi-step)
-            fig, axes = plt.subplots(n_models, 3, figsize=(18, 6*n_models))
+            # Create subplots: 1 row per model, 4 columns (Classification, Regression, Financial, Price Comparison)
+            fig, axes = plt.subplots(n_models, 4, figsize=(24, 6*n_models))
             if n_models == 1:
                 axes = axes.reshape(1, -1)
             
-            fig.suptitle(f'{symbol} - Multi-Step Stock Predictions', fontsize=16, fontweight='bold')
+            fig.suptitle(f'{symbol} - Model Performance Metrics & Price Predictions', fontsize=16, fontweight='bold')
             
             for i, (model_name, result) in enumerate(symbol_results.items()):
-                predictions = result['predictions']  # Shape: [n_samples, predict_len]
-                actuals = result['actuals']          # Shape: [n_samples, predict_len]
-                timestamps = result['timestamps']
+                metrics = result['metrics']
+                predictions = result['predictions']
+                actuals = result['actuals']
                 prices = result['prices']
+                timestamps = result['timestamps']
                 predict_len = predictions.shape[1]
                 
-                # Plot 1: Calendar-aligned predictions vs actual timeline
-                # NEW APPROACH: Shows single actual timeline with predictions aligned to target dates
-                # This eliminates the confusing multiple "Actual T+1, T+2, T+3" lines
-                axes[i, 0].set_title(f'{model_name} - Multi-Step Predictions vs Actual')
-                axes[i, 0].set_ylabel('Return (%)')
+                # Plot 1: Classification Metrics (Trend Prediction)
+                classification_metrics = ['accuracy', 'balanced_accuracy', 'f1_score', 'auc_roc']
+                classification_values = [metrics.get(metric, 0) for metric in classification_metrics]
+                classification_labels = ['Accuracy', 'Balanced Accuracy', 'F1-Score', 'AUC-ROC']
                 
-                # Try to get actual returns timeline - if it fails, use simpler approach
-                actual_timeline = self._get_actual_returns_timeline(symbol, timestamps, actuals, predict_len)
-                
-                if actual_timeline is not None:
-                    # Plot single actual timeline (what really happened each day)
-                    axes[i, 0].plot(actual_timeline['dates'], actual_timeline['returns'], 
-                                   'k-', linewidth=2, label='Actual Returns', alpha=0.8)
-                    
-                    # Plot aligned predictions for each step (what model predicted for each day)
-                    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
-                    for step in range(min(predict_len, 3)):  # Show first 3 steps to avoid clutter
-                        aligned_data = self._align_predictions_to_calendar(timestamps, predictions[:, step], step)
-                        if aligned_data is not None:
-                            axes[i, 0].plot(aligned_data['target_dates'], aligned_data['predictions'], 
-                                           '--', color=colors[step], alpha=0.7, linewidth=1.5,
-                                           label=f'T+{step+1} Predictions')
-                else:
-                    # Fallback: Simple time-series plot without date alignment
-                    print(f"   ⚠️ Using fallback visualization for {symbol}")
-                    x_axis = range(len(timestamps))
-                    
-                    # Plot actual returns for first few steps
-                    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
-                    for step in range(min(predict_len, 3)):
-                        axes[i, 0].plot(x_axis, actuals[:, step], 
-                                       color=colors[step], alpha=0.7, linewidth=1.5,
-                                       label=f'Actual T+{step+1}')
-                        axes[i, 0].plot(x_axis, predictions[:, step], 
-                                       '--', color=colors[step], alpha=0.7, linewidth=1.5,
-                                       label=f'Pred T+{step+1}')
-                    
-                    axes[i, 0].set_xlabel('Sequence Index')
-                
-                axes[i, 0].legend()
+                bars1 = axes[i, 0].bar(classification_labels, classification_values, 
+                                      color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'], alpha=0.8)
+                axes[i, 0].set_title(f'{model_name} - Classification Metrics')
+                axes[i, 0].set_ylabel('Score')
+                axes[i, 0].set_ylim(0, 1)
                 axes[i, 0].grid(True, alpha=0.3)
-                axes[i, 0].tick_params(axis='x', rotation=45)
                 
-                # Plot 2: Enhanced price path visualization
-                axes[i, 1].set_title(f'{model_name} - Price Prediction Paths (Sample Sequences)')
-                axes[i, 1].set_ylabel('Price ($)')
-                axes[i, 1].set_xlabel('Days from Prediction Start')
+                # Add value labels on bars
+                for bar, value in zip(bars1, classification_values):
+                    axes[i, 0].text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.01,
+                                   f'{value:.3f}', ha='center', va='bottom', fontsize=10)
                 
-                # Show sample sequences with better spacing
-                n_show = min(8, len(predictions))
-                sample_indices = np.linspace(0, len(predictions)-1, n_show, dtype=int)
+                # Plot 2: Regression Metrics (Price Prediction)
+                regression_metrics = ['mae_returns', 'rmse_returns', 'mape_returns', 'r2_returns']
+                regression_values = [metrics.get(metric, 0) for metric in regression_metrics]
+                regression_labels = ['MAE', 'RMSE', 'MAPE (%)', 'R²']
                 
-                for idx, seq_idx in enumerate(sample_indices):
-                    start_price = prices[seq_idx]
-                    
-                    # Actual price path
-                    actual_path = [start_price]
-                    pred_path = [start_price]
-                    
-                    for step in range(predict_len):
-                        actual_path.append(actual_path[-1] * (1 + actuals[seq_idx, step]))
-                        pred_path.append(pred_path[-1] * (1 + predictions[seq_idx, step]))
-                    
-                    x_steps = list(range(predict_len + 1))
-                    
-                    # Use consistent alpha and slightly different colors for variety
-                    alpha = 0.7 if idx < 3 else 0.5  # Highlight first few sequences
-                    
-                    axes[i, 1].plot(x_steps, actual_path, 'b-', alpha=alpha, linewidth=1.5)
-                    axes[i, 1].plot(x_steps, pred_path, 'r--', alpha=alpha, linewidth=1.5)
+                # Normalize MAPE to be on similar scale (divide by 100)
+                regression_values_normalized = regression_values.copy()
+                if len(regression_values_normalized) > 2:
+                    regression_values_normalized[2] = regression_values_normalized[2] / 100  # MAPE normalization
                 
-                # Add legend
-                axes[i, 1].plot([], [], 'b-', label='Actual Price Paths', alpha=0.8, linewidth=2)
-                axes[i, 1].plot([], [], 'r--', label='Predicted Price Paths', alpha=0.8, linewidth=2)
-                axes[i, 1].legend()
+                bars2 = axes[i, 1].bar(regression_labels, regression_values_normalized, 
+                                      color=['#9467bd', '#8c564b', '#e377c2', '#7f7f7f'], alpha=0.8)
+                axes[i, 1].set_title(f'{model_name} - Regression Metrics')
+                axes[i, 1].set_ylabel('Score')
                 axes[i, 1].grid(True, alpha=0.3)
                 
-                # Plot 3: Step-wise performance metrics
-                steps = list(range(1, predict_len + 1))
-                step_r2s = []
-                step_maes = []
+                # Add value labels on bars (show original values)
+                for bar, value, orig_value in zip(bars2, regression_values_normalized, regression_values):
+                    axes[i, 1].text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.001,
+                                   f'{orig_value:.3f}', ha='center', va='bottom', fontsize=10)
                 
-                for step in range(predict_len):
-                    r2_key = f'r2_step_{step+1}'
-                    mae_key = f'mae_step_{step+1}'
-                    step_r2s.append(result['metrics'].get(r2_key, 0))
-                    step_maes.append(result['metrics'].get(mae_key, 0))
+                # Plot 3: Financial Metrics
+                financial_metrics = ['annualized_return_predicted', 'sharpe_ratio', 'mdd_predicted', 'cumulative_return_predicted']
+                financial_values = [metrics.get(metric, 0) for metric in financial_metrics]
+                financial_labels = ['Annualized Return', 'Sharpe Ratio', 'Max Drawdown', 'Cumulative Return']
                 
-                ax3_twin = axes[i, 2].twinx()
+                # Color bars based on performance (green for positive, red for negative)
+                colors = []
+                for val in financial_values:
+                    if val > 0:
+                        colors.append('#2ca02c')  # Green
+                    else:
+                        colors.append('#d62728')  # Red
                 
-                line1 = axes[i, 2].plot(steps, step_r2s, 'b-o', label='R² Score', linewidth=2)
-                line2 = ax3_twin.plot(steps, step_maes, 'r-s', label='MAE', linewidth=2)
-                
-                axes[i, 2].set_title(f'{model_name} - Step-wise Performance')
-                axes[i, 2].set_xlabel('Prediction Step')
-                axes[i, 2].set_ylabel('R² Score', color='b')
-                ax3_twin.set_ylabel('MAE', color='r')
-                
-                # Combine legends
-                lines = line1 + line2
-                labels = [l.get_label() for l in lines]
-                axes[i, 2].legend(lines, labels, loc='upper right')
-                
+                bars3 = axes[i, 2].bar(financial_labels, financial_values, 
+                                      color=colors, alpha=0.8)
+                axes[i, 2].set_title(f'{model_name} - Financial Metrics')
+                axes[i, 2].set_ylabel('Value')
                 axes[i, 2].grid(True, alpha=0.3)
-                axes[i, 2].set_xticks(steps)
+                axes[i, 2].axhline(y=0, color='black', linestyle='-', alpha=0.3)
                 
-                print(f"  📊 {model_name} - Overall R²: {result['metrics']['r2_returns']:.4f}")
+                # Add value labels on bars
+                for bar, value in zip(bars3, financial_values):
+                    y_pos = bar.get_height() + 0.001 if value >= 0 else bar.get_height() - 0.01
+                    axes[i, 2].text(bar.get_x() + bar.get_width()/2., y_pos,
+                                   f'{value:.3f}', ha='center', va='bottom' if value >= 0 else 'top', fontsize=10)
+                
+                # Plot 4: Actual vs Predicted Price Comparison
+                axes[i, 3].set_title(f'{model_name} - Price Predictions vs Actual')
+                axes[i, 3].set_ylabel('Price ($)')
+                axes[i, 3].set_xlabel('Time (Sample Index)')
+                
+                # Reconstruct price sequences for visualization
+                n_samples_to_show = min(50, len(predictions))  # Show first 50 samples for clarity
+                sample_indices = np.arange(n_samples_to_show)
+                
+                # Calculate actual and predicted prices for each sample
+                actual_final_prices = []
+                predicted_final_prices = []
+                
+                for j in range(n_samples_to_show):
+                    start_price = prices[j]
+                    
+                    # Calculate final price after predict_len days
+                    actual_final_price = start_price * np.prod(1 + actuals[j])
+                    predicted_final_price = start_price * np.prod(1 + predictions[j])
+                    
+                    actual_final_prices.append(actual_final_price)
+                    predicted_final_prices.append(predicted_final_price)
+                
+                # Plot actual vs predicted final prices
+                axes[i, 3].plot(sample_indices, actual_final_prices, 'b-', linewidth=2, 
+                               label='Actual Prices', alpha=0.8)
+                axes[i, 3].plot(sample_indices, predicted_final_prices, 'r--', linewidth=2, 
+                               label='Predicted Prices', alpha=0.8)
+                
+                # Add correlation coefficient
+                corr_coef = np.corrcoef(actual_final_prices, predicted_final_prices)[0, 1]
+                axes[i, 3].text(0.05, 0.95, f'Correlation: {corr_coef:.3f}', 
+                               transform=axes[i, 3].transAxes, fontsize=10, 
+                               bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+                
+                axes[i, 3].legend()
+                axes[i, 3].grid(True, alpha=0.3)
+                
+                # Rotate x-axis labels for better readability
+                for col in range(4):
+                    axes[i, col].tick_params(axis='x', rotation=45)
+                
+                # Print summary for this model
+                print(f"  📊 {model_name} Summary:")
+                print(f"     Classification - Accuracy: {metrics.get('accuracy', 0):.3f}, F1: {metrics.get('f1_score', 0):.3f}")
+                print(f"     Regression - MAE: {metrics.get('mae_returns', 0):.3f}, R²: {metrics.get('r2_returns', 0):.3f}")
+                print(f"     Financial - Sharpe: {metrics.get('sharpe_ratio', 0):.3f}, Return: {metrics.get('annualized_return_predicted', 0):.3f}")
+                print(f"     Price Correlation: {corr_coef:.3f}")
                 
             plt.tight_layout()
-            plot_path = self.output_dir / f"{symbol}_multistep_predictions.png"
+            plot_path = self.output_dir / f"{symbol}_performance_metrics.png"
             plt.savefig(plot_path, dpi=300, bbox_inches='tight')
             plt.close()
             
-            print(f"  📈 {symbol} multi-step plots saved to {plot_path}")
+            print(f"  📈 {symbol} performance metrics plot saved to {plot_path}")
             
         except Exception as e:
             print(f"❌ Failed to create plots for {symbol}: {e}")
             import traceback
             traceback.print_exc()
     
-    def _get_actual_returns_timeline(self, symbol: str, timestamps: np.ndarray, actuals: np.ndarray, predict_len: int):
-        """Create a unified actual returns timeline for the validation period."""
-        try:
-            from datetime import datetime, timedelta
-            import pandas as pd
-            
-            # Debug: Check what type of timestamps we're getting
-            if len(timestamps) > 0:
-                sample_timestamp = timestamps[0]
-                print(f"   📅 Debug: Sample timestamp type: {type(sample_timestamp)}, value: {sample_timestamp}")
-            
-            # Get all target dates covered by predictions
-            all_target_dates = []
-            all_actual_returns = []
-            
-            for i, pred_start_date in enumerate(timestamps):
-                # Convert various timestamp formats to datetime
-                if isinstance(pred_start_date, str):
-                    pred_start_date = datetime.strptime(pred_start_date, '%Y-%m-%d')
-                elif isinstance(pred_start_date, np.datetime64):
-                    pred_start_date = pd.to_datetime(pred_start_date).to_pydatetime()
-                elif isinstance(pred_start_date, (int, np.integer)):
-                    # Handle time indices - convert to date using a base date
-                    # Assume time_idx=0 corresponds to the start date
-                    base_date = datetime.strptime(self.config['start_date'], '%Y-%m-%d')
-                    pred_start_date = base_date + timedelta(days=int(pred_start_date))
-                elif hasattr(pred_start_date, 'date'):
-                    # Handle pandas Timestamp
-                    pred_start_date = pred_start_date.date()
-                    pred_start_date = datetime.combine(pred_start_date, datetime.min.time())
-                elif pd.isna(pred_start_date):
-                    # Handle NaN values
-                    base_date = datetime.strptime(self.config['start_date'], '%Y-%m-%d')
-                    pred_start_date = base_date + timedelta(days=i)
-                else:
-                    # Try to convert to datetime
-                    pred_start_date = pd.to_datetime(pred_start_date).to_pydatetime()
-                
-                for step in range(predict_len):
-                    target_date = pred_start_date + timedelta(days=step+1)
-                    all_target_dates.append(target_date)
-                    all_actual_returns.append(actuals[i, step])
-            
-            # Create DataFrame and remove duplicates by averaging
-            df = pd.DataFrame({
-                'dates': all_target_dates,
-                'returns': all_actual_returns
-            })
-            
-            # Group by date and take mean (should be identical, but just in case)
-            timeline = df.groupby('dates').agg({'returns': 'mean'}).reset_index()
-            timeline = timeline.sort_values('dates')
-            
-            return timeline
-            
-        except Exception as e:
-            print(f"   ⚠️ Could not create actual timeline for {symbol}: {e}")
-            return None
-    
-    def _align_predictions_to_calendar(self, timestamps: np.ndarray, predictions: np.ndarray, step: int):
-        """Align predictions to their target calendar dates."""
-        try:
-            from datetime import datetime, timedelta
-            import pandas as pd
-            
-            target_dates = []
-            aligned_predictions = []
-            
-            for i, pred_start_date in enumerate(timestamps):
-                # Convert various timestamp formats to datetime
-                if isinstance(pred_start_date, str):
-                    pred_start_date = datetime.strptime(pred_start_date, '%Y-%m-%d')
-                elif isinstance(pred_start_date, np.datetime64):
-                    pred_start_date = pd.to_datetime(pred_start_date).to_pydatetime()
-                elif isinstance(pred_start_date, (int, np.integer)):
-                    # Handle time indices - convert to date using a base date
-                    # Assume time_idx=0 corresponds to the start date
-                    base_date = datetime.strptime(self.config['start_date'], '%Y-%m-%d')
-                    pred_start_date = base_date + timedelta(days=int(pred_start_date))
-                elif hasattr(pred_start_date, 'date'):
-                    # Handle pandas Timestamp
-                    pred_start_date = pred_start_date.date()
-                    pred_start_date = datetime.combine(pred_start_date, datetime.min.time())
-                elif pd.isna(pred_start_date):
-                    # Handle NaN values
-                    base_date = datetime.strptime(self.config['start_date'], '%Y-%m-%d')
-                    pred_start_date = base_date + timedelta(days=i)
-                else:
-                    # Try to convert to datetime
-                    pred_start_date = pd.to_datetime(pred_start_date).to_pydatetime()
-                
-                target_date = pred_start_date + timedelta(days=step+1)
-                target_dates.append(target_date)
-                aligned_predictions.append(predictions[i])
-            
-            return {
-                'target_dates': target_dates,
-                'predictions': aligned_predictions
-            }
-            
-        except Exception as e:
-            print(f"   ⚠️ Could not align predictions for step {step}: {e}")
-            return None
-    
     def create_comparison_plots(self):
-        """Create comparison plots across models and symbols."""
+        """Create comparison plots across models and symbols with new metrics categories."""
         print("\n📊 Creating model comparison plots...")
         
         # Collect all metrics
@@ -1073,55 +1036,71 @@ class FixedBaselineRunner:
         try:
             metrics_df = pd.DataFrame(all_metrics)
             
-            # Create comparison plots
-            fig, axes = plt.subplots(2, 3, figsize=(20, 12))
-            fig.suptitle('Model Performance Comparison - CORRECTED METRICS', fontsize=16, fontweight='bold')
+            # Create comparison plots - 3 categories (Classification, Regression, Financial)
+            fig, axes = plt.subplots(3, 2, figsize=(16, 18))
+            fig.suptitle('Model Performance Comparison - Classification, Regression & Financial Metrics', fontsize=16, fontweight='bold')
             
-            # R² (Returns) by model and symbol
-            r2_pivot = metrics_df.pivot(index='symbol', columns='model', values='r2_returns')
-            r2_pivot.plot(kind='bar', ax=axes[0, 0])
-            axes[0, 0].set_title('R² Score (Returns) by Model and Symbol')
-            axes[0, 0].set_ylabel('R² Score')
+            # Row 1: Classification: Accuracy by model and symbol
+            accuracy_pivot = metrics_df.pivot(index='symbol', columns='model', values='accuracy')
+            accuracy_pivot.plot(kind='bar', ax=axes[0, 0])
+            axes[0, 0].set_title('Classification: Accuracy by Model and Symbol')
+            axes[0, 0].set_ylabel('Accuracy Score')
             axes[0, 0].tick_params(axis='x', rotation=45)
             axes[0, 0].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             
-            # R² (Corrected Prices) by model and symbol
-            r2_price_pivot = metrics_df.pivot(index='symbol', columns='model', values='r2_prices_corrected')
-            r2_price_pivot.plot(kind='bar', ax=axes[0, 1])
-            axes[0, 1].set_title('R² Score (Corrected Prices) by Model and Symbol')
+            # Row 1: Regression: R² by model and symbol
+            r2_pivot = metrics_df.pivot(index='symbol', columns='model', values='r2_returns')
+            r2_pivot.plot(kind='bar', ax=axes[0, 1])
+            axes[0, 1].set_title('Regression: R² Score by Model and Symbol')
             axes[0, 1].set_ylabel('R² Score')
             axes[0, 1].tick_params(axis='x', rotation=45)
             axes[0, 1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             
-            # Directional Accuracy by model and symbol
-            dir_acc_pivot = metrics_df.pivot(index='symbol', columns='model', values='directional_accuracy')
-            dir_acc_pivot.plot(kind='bar', ax=axes[0, 2])
-            axes[0, 2].set_title('Directional Accuracy by Model and Symbol')
-            axes[0, 2].set_ylabel('Accuracy (%)')
-            axes[0, 2].tick_params(axis='x', rotation=45)
-            axes[0, 2].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            # Row 2: Financial: Sharpe Ratio by model and symbol
+            sharpe_pivot = metrics_df.pivot(index='symbol', columns='model', values='sharpe_ratio')
+            sharpe_pivot.plot(kind='bar', ax=axes[1, 0])
+            axes[1, 0].set_title('Financial: Sharpe Ratio by Model and Symbol')
+            axes[1, 0].set_ylabel('Sharpe Ratio')
+            axes[1, 0].tick_params(axis='x', rotation=45)
+            axes[1, 0].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             
-            # Average performance by model
+            # Row 2: Returns MAPE comparison
+            mape_pivot = metrics_df.pivot(index='symbol', columns='model', values='mape_returns')
+            mape_pivot.plot(kind='bar', ax=axes[1, 1])
+            axes[1, 1].set_title('Returns: MAPE by Model and Symbol')
+            axes[1, 1].set_ylabel('MAPE (%)')
+            axes[1, 1].tick_params(axis='x', rotation=45)
+            axes[1, 1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            
+            # Row 3: Average performance by model
             avg_metrics = metrics_df.groupby('model').agg({
+                'accuracy': 'mean',
+                'f1_score': 'mean',
                 'r2_returns': 'mean',
-                'r2_prices_corrected': 'mean',
-                'directional_accuracy': 'mean'
+                'mae_returns': 'mean',
+                'sharpe_ratio': 'mean',
+                'annualized_return_predicted': 'mean'
             })
             
-            avg_metrics['r2_returns'].plot(kind='bar', ax=axes[1, 0])
-            axes[1, 0].set_title('Average R² Score (Returns) by Model')
-            axes[1, 0].set_ylabel('Average R² Score')
-            axes[1, 0].tick_params(axis='x', rotation=45)
+            # Average Classification metrics
+            classification_avg = avg_metrics[['accuracy', 'f1_score']]
+            classification_avg.plot(kind='bar', ax=axes[2, 0])
+            axes[2, 0].set_title('Average Classification Performance by Model')
+            axes[2, 0].set_ylabel('Average Score')
+            axes[2, 0].tick_params(axis='x', rotation=45)
             
-            avg_metrics['r2_prices_corrected'].plot(kind='bar', ax=axes[1, 1])
-            axes[1, 1].set_title('Average R² Score (Corrected Prices) by Model')
-            axes[1, 1].set_ylabel('Average R² Score')
-            axes[1, 1].tick_params(axis='x', rotation=45)
-            
-            avg_metrics['directional_accuracy'].plot(kind='bar', ax=axes[1, 2])
-            axes[1, 2].set_title('Average Directional Accuracy by Model')
-            axes[1, 2].set_ylabel('Average Accuracy (%)')
-            axes[1, 2].tick_params(axis='x', rotation=45)
+            # Average Regression metrics
+            regression_avg = avg_metrics[['r2_returns', 'mae_returns']]
+            # Use secondary y-axis for MAE since it's on different scale
+            ax_twin = axes[2, 1].twinx()
+            avg_metrics['r2_returns'].plot(kind='bar', ax=axes[2, 1], color='blue', alpha=0.7, label='R²')
+            avg_metrics['mae_returns'].plot(kind='bar', ax=ax_twin, color='red', alpha=0.7, label='MAE')
+            axes[2, 1].set_title('Average Regression Performance by Model')
+            axes[2, 1].set_ylabel('R² Score', color='blue')
+            ax_twin.set_ylabel('MAE', color='red')
+            axes[2, 1].tick_params(axis='x', rotation=45)
+            axes[2, 1].legend(loc='upper left')
+            ax_twin.legend(loc='upper right')
             
             plt.tight_layout()
             comparison_path = self.output_dir / "model_comparison.png"
@@ -1137,9 +1116,163 @@ class FixedBaselineRunner:
             
         except Exception as e:
             print(f"❌ Failed to create comparison plots: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def create_returns_comparison_plots(self, symbol: str):
+        """Create detailed returns comparison plots for a specific symbol."""
+        if symbol not in self.results or len(self.results[symbol]) == 0:
+            print(f"⚠️ No results to create returns comparison for {symbol}")
+            return
+            
+        print(f"📊 Creating returns comparison plots for {symbol}...")
+        
+        symbol_results = self.results[symbol]
+        n_models = len(symbol_results)
+        
+        try:
+            # Create subplots: 2 rows, 3 columns for various comparison views
+            fig, axes = plt.subplots(2, 3, figsize=(20, 12))
+            fig.suptitle(f'{symbol} - Returns Analysis & Comparison', fontsize=16, fontweight='bold')
+            
+            # Collect all data for analysis
+            all_actual_returns = []
+            all_predicted_returns = []
+            model_names = []
+            
+            for model_name, result in symbol_results.items():
+                actuals = result['actuals']
+                predictions = result['predictions']
+                
+                # Flatten multi-step predictions for analysis
+                actual_returns_flat = actuals.flatten()
+                predicted_returns_flat = predictions.flatten()
+                
+                all_actual_returns.extend(actual_returns_flat)
+                all_predicted_returns.extend(predicted_returns_flat)
+                model_names.extend([model_name] * len(actual_returns_flat))
+            
+            # Convert to numpy arrays
+            all_actual_returns = np.array(all_actual_returns)
+            all_predicted_returns = np.array(all_predicted_returns)
+            
+            # Plot 1: Overall Returns Scatter Plot
+            axes[0, 0].scatter(all_actual_returns, all_predicted_returns, alpha=0.6)
+            axes[0, 0].plot([all_actual_returns.min(), all_actual_returns.max()], 
+                           [all_actual_returns.min(), all_actual_returns.max()], 'r--', lw=2)
+            axes[0, 0].set_xlabel('Actual Returns')
+            axes[0, 0].set_ylabel('Predicted Returns')
+            axes[0, 0].set_title('Overall Returns: Actual vs Predicted')
+            axes[0, 0].grid(True, alpha=0.3)
+            
+            # Add correlation coefficient
+            corr_coef = np.corrcoef(all_actual_returns, all_predicted_returns)[0, 1]
+            axes[0, 0].text(0.05, 0.95, f'Correlation: {corr_coef:.3f}', 
+                           transform=axes[0, 0].transAxes, fontsize=10,
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+            
+            # Plot 2: Returns Distribution Comparison
+            axes[0, 1].hist(all_actual_returns, bins=50, alpha=0.7, label='Actual Returns', density=True)
+            axes[0, 1].hist(all_predicted_returns, bins=50, alpha=0.7, label='Predicted Returns', density=True)
+            axes[0, 1].set_xlabel('Returns')
+            axes[0, 1].set_ylabel('Density')
+            axes[0, 1].set_title('Returns Distribution Comparison')
+            axes[0, 1].legend()
+            axes[0, 1].grid(True, alpha=0.3)
+            
+            # Plot 3: Model-wise Returns MAPE
+            model_mapes = []
+            unique_models = list(symbol_results.keys())
+            
+            for model_name in unique_models:
+                result = symbol_results[model_name]
+                mape = result['metrics']['mape_returns']
+                model_mapes.append(mape)
+            
+            bars = axes[0, 2].bar(unique_models, model_mapes, alpha=0.8)
+            axes[0, 2].set_title('Returns MAPE by Model')
+            axes[0, 2].set_ylabel('MAPE (%)')
+            axes[0, 2].tick_params(axis='x', rotation=45)
+            axes[0, 2].grid(True, alpha=0.3)
+            
+            # Add value labels on bars
+            for bar, value in zip(bars, model_mapes):
+                axes[0, 2].text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.1,
+                               f'{value:.2f}%', ha='center', va='bottom', fontsize=10)
+            
+            # Plot 4: Time Series of Returns (show a sample)
+            # Take the first model's time series for demonstration
+            first_model = list(symbol_results.keys())[0]
+            first_result = symbol_results[first_model]
+            sample_size = min(100, len(first_result['actuals']))
+            
+            sample_indices = np.arange(sample_size)
+            sample_actual = first_result['actuals'][:sample_size].mean(axis=1)  # Average across prediction steps
+            sample_predicted = first_result['predictions'][:sample_size].mean(axis=1)
+            
+            axes[1, 0].plot(sample_indices, sample_actual, 'b-', label='Actual Returns', linewidth=2)
+            axes[1, 0].plot(sample_indices, sample_predicted, 'r--', label='Predicted Returns', linewidth=2)
+            axes[1, 0].set_xlabel('Time (Sample Index)')
+            axes[1, 0].set_ylabel('Average Returns')
+            axes[1, 0].set_title(f'Time Series Returns ({first_model})')
+            axes[1, 0].legend()
+            axes[1, 0].grid(True, alpha=0.3)
+            
+            # Plot 5: Residuals Analysis
+            residuals = all_predicted_returns - all_actual_returns
+            axes[1, 1].scatter(all_actual_returns, residuals, alpha=0.6)
+            axes[1, 1].axhline(y=0, color='r', linestyle='--', lw=2)
+            axes[1, 1].set_xlabel('Actual Returns')
+            axes[1, 1].set_ylabel('Residuals (Predicted - Actual)')
+            axes[1, 1].set_title('Residuals Analysis')
+            axes[1, 1].grid(True, alpha=0.3)
+            
+            # Plot 6: Cumulative Returns Comparison
+            # Calculate cumulative returns for each model
+            axes[1, 2].set_title('Cumulative Returns by Model')
+            axes[1, 2].set_xlabel('Time (Sample Index)')
+            axes[1, 2].set_ylabel('Cumulative Returns')
+            
+            for i, (model_name, result) in enumerate(symbol_results.items()):
+                actuals = result['actuals']
+                predictions = result['predictions']
+                
+                # Calculate cumulative returns for first 50 samples
+                n_samples = min(50, len(actuals))
+                cumulative_actual = []
+                cumulative_predicted = []
+                
+                for j in range(n_samples):
+                    if j == 0:
+                        cumulative_actual.append(0)
+                        cumulative_predicted.append(0)
+                    else:
+                        cumulative_actual.append(cumulative_actual[-1] + actuals[j].mean())
+                        cumulative_predicted.append(cumulative_predicted[-1] + predictions[j].mean())
+                
+                sample_indices = np.arange(n_samples)
+                axes[1, 2].plot(sample_indices, cumulative_actual, '-', 
+                               label=f'{model_name} (Actual)', alpha=0.7)
+                axes[1, 2].plot(sample_indices, cumulative_predicted, '--', 
+                               label=f'{model_name} (Predicted)', alpha=0.7)
+            
+            axes[1, 2].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            axes[1, 2].grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plot_path = self.output_dir / f"{symbol}_returns_comparison.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📈 {symbol} returns comparison plots saved to {plot_path}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create returns comparison plots for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
     
     def print_summary(self):
-        """Print summary of results."""
+        """Print summary of results with new metrics categories."""
         print("\n" + "=" * 60)
         print("📋 RESULTS SUMMARY")
         print("=" * 60)
@@ -1156,57 +1289,89 @@ class FixedBaselineRunner:
                 for model_name, result in symbol_results.items():
                     if model_name not in model_averages:
                         model_averages[model_name] = {
-                            'r2': [], 'mae': [], 'mape': [], 
-                            'r2_price_corrected': [], 'mae_price_corrected': [],
-                            'directional_accuracy': [], 'cumulative_error': []
+                            # Classification metrics
+                            'accuracy': [], 'f1_score': [], 'auc_roc': [],
+                            # Regression metrics
+                            'mae_returns': [], 'rmse_returns': [], 'r2_returns': [], 'mape_returns': [],
+                            # Financial metrics
+                            'sharpe_ratio': [], 'annualized_return_predicted': [], 'mdd_predicted': []
                         }
                     
                     metrics = result['metrics']
-                    model_averages[model_name]['r2'].append(metrics['r2_returns'])
-                    model_averages[model_name]['mae'].append(metrics['mae_returns'])
-                    model_averages[model_name]['mape'].append(metrics['mape_prices_corrected'])
-                    model_averages[model_name]['r2_price_corrected'].append(metrics['r2_prices_corrected'])
-                    model_averages[model_name]['mae_price_corrected'].append(metrics['mae_prices_corrected'])
-                    model_averages[model_name]['directional_accuracy'].append(metrics['directional_accuracy'])
-                    model_averages[model_name]['cumulative_error'].append(metrics['cumulative_return_error'])
+                    # Classification
+                    model_averages[model_name]['accuracy'].append(metrics.get('accuracy', 0))
+                    model_averages[model_name]['f1_score'].append(metrics.get('f1_score', 0))
+                    model_averages[model_name]['auc_roc'].append(metrics.get('auc_roc', 0))
+                    # Regression
+                    model_averages[model_name]['mae_returns'].append(metrics.get('mae_returns', 0))
+                    model_averages[model_name]['rmse_returns'].append(metrics.get('rmse_returns', 0))
+                    model_averages[model_name]['r2_returns'].append(metrics.get('r2_returns', 0))
+                    model_averages[model_name]['mape_returns'].append(metrics.get('mape_returns', 0))
+                    # Financial
+                    model_averages[model_name]['sharpe_ratio'].append(metrics.get('sharpe_ratio', 0))
+                    model_averages[model_name]['annualized_return_predicted'].append(metrics.get('annualized_return_predicted', 0))
+                    model_averages[model_name]['mdd_predicted'].append(metrics.get('mdd_predicted', 0))
             
             if not model_averages:
                 print("❌ No model results to average")
                 return
             
             # Print comprehensive summary table
-            print(f"{'Model':<20} {'R²(Ret)':<10} {'MAE(Ret)':<12} {'R²(Price)':<12} {'MAE($)':<10} {'Dir.Acc':<8} {'Cum.Err':<10}")
-            print("-" * 102)
+            print("🎯 CLASSIFICATION METRICS (Trend Prediction)")
+            print(f"{'Model':<20} {'Accuracy':<10} {'F1-Score':<10} {'AUC-ROC':<10}")
+            print("-" * 52)
+            
+            for model_name, metrics in model_averages.items():
+                avg_accuracy = np.mean(metrics['accuracy'])
+                avg_f1 = np.mean(metrics['f1_score'])
+                avg_auc = np.mean(metrics['auc_roc'])
+                
+                print(f"{model_name:<20} {avg_accuracy:<10.3f} {avg_f1:<10.3f} {avg_auc:<10.3f}")
+            
+            print("\n📊 REGRESSION METRICS (Price Prediction)")
+            print(f"{'Model':<20} {'MAE':<10} {'RMSE':<10} {'MAPE(%)':<10} {'R²':<10}")
+            print("-" * 62)
             
             best_r2 = -np.inf
             best_model = ""
             
             for model_name, metrics in model_averages.items():
-                avg_r2 = np.mean(metrics['r2'])
-                avg_mae = np.mean(metrics['mae'])
-                avg_r2_price = np.mean(metrics['r2_price_corrected'])
-                avg_mae_price = np.mean(metrics['mae_price_corrected'])
-                avg_dir_acc = np.mean(metrics['directional_accuracy'])
-                avg_cum_err = np.mean(metrics['cumulative_error'])
+                avg_mae = np.mean(metrics['mae_returns'])
+                avg_rmse = np.mean(metrics['rmse_returns'])
+                avg_r2 = np.mean(metrics['r2_returns'])
+                avg_mape = np.mean(metrics['mape_returns'])
                 
-                print(f"{model_name:<20} {avg_r2:<10.4f} {avg_mae:<12.4f} {avg_r2_price:<12.4f} {avg_mae_price:<10.2f} {avg_dir_acc:<8.1f}% {avg_cum_err:<10.4f}")
+                print(f"{model_name:<20} {avg_mae:<10.4f} {avg_rmse:<10.4f} {avg_mape:<10.2f} {avg_r2:<10.4f}")
                 
                 if avg_r2 > best_r2:
                     best_r2 = avg_r2
                     best_model = model_name
             
-            print(f"\n🏆 Best performing model (avg): {best_model} (R² = {best_r2:.4f})")
+            print("\n💰 FINANCIAL METRICS")
+            print(f"{'Model':<20} {'Sharpe':<10} {'Ann.Return':<12} {'Max DD':<10}")
+            print("-" * 54)
+            
+            for model_name, metrics in model_averages.items():
+                avg_sharpe = np.mean(metrics['sharpe_ratio'])
+                avg_return = np.mean(metrics['annualized_return_predicted'])
+                avg_mdd = np.mean(metrics['mdd_predicted'])
+                
+                print(f"{model_name:<20} {avg_sharpe:<10.3f} {avg_return:<12.3f} {avg_mdd:<10.3f}")
+            
+            print(f"\n🏆 Best performing model (Regression R²): {best_model} (R² = {best_r2:.4f})")
             
             # Print per-symbol details
-            print(f"\n📊 Per-Symbol Performance (Corrected Metrics):")
+            print(f"\n📊 Per-Symbol Performance Summary:")
             for symbol in self.results:
                 print(f"\n  {symbol}:")
                 for model_name, result in self.results[symbol].items():
                     metrics = result['metrics']
-                    print(f"    {model_name:<15}: R²(Ret)={metrics['r2_returns']:.4f}, R²(Price)={metrics['r2_prices_corrected']:.4f}, Dir={metrics['directional_accuracy']:.1f}%")
+                    print(f"    {model_name:<15}: Acc={metrics.get('accuracy', 0):.3f}, R²={metrics.get('r2_returns', 0):.3f}, Sharpe={metrics.get('sharpe_ratio', 0):.3f}")
                     
         except Exception as e:
             print(f"❌ Error in summary: {e}")
+            import traceback
+            traceback.print_exc()
 
 def parse_arguments():
     """Parse command line arguments to match TFT pipeline configuration."""
@@ -1230,11 +1395,14 @@ def parse_arguments():
     
     # API keys for multimodal data
     parser.add_argument('--news-api-key', type=str, 
-                        help='News API key for news data')
+                        default=os.getenv('NEWS_API_KEY'),
+                        help='News API key for news data (default: from NEWS_API_KEY env var)')
     parser.add_argument('--fred-api-key', type=str, 
-                        help='FRED API key for economic data')
+                        default=os.getenv('FRED_API_KEY'),
+                        help='FRED API key for economic data (default: from FRED_API_KEY env var)')
     parser.add_argument('--api-ninjas-key', type=str, 
-                        help='API Ninjas key for additional data')
+                        default=os.getenv('API_NINJAS_KEY'),
+                        help='API Ninjas key for additional data (default: from API_NINJAS_KEY env var)')
     
     # Training configuration - more conservative defaults
     parser.add_argument('--validation-split', type=float, default=0.7, 
@@ -1287,6 +1455,15 @@ def main():
     print(f"⚡ Using EXACT same data loading as TFT pipeline")
     print(f"📏 Encoder length: {config['encoder_len']}, Predict length: {config['predict_len']}")
     
+    # Log API key status
+    print(f"\n🔑 API Key Status:")
+    print(f"   NEWS_API_KEY: {'✅ Set' if config['news_api_key'] else '❌ Not set'}")
+    print(f"   FRED_API_KEY: {'✅ Set' if config['fred_api_key'] else '❌ Not set'}")
+    print(f"   API_NINJAS_KEY: {'✅ Set' if config['api_ninjas_key'] else '❌ Not set'}")
+    if use_multimodal and not any([config['news_api_key'], config['fred_api_key'], config['api_ninjas_key']]):
+        print("   ⚠️  No API keys set - multimodal features will be limited")
+        print("   💡 Set API keys in .env file or use command line arguments")
+    
     try:
         # Step 1: Initialize runner with configuration
         print("\n" + "=" * 60)
@@ -1328,6 +1505,7 @@ def main():
         
         for symbol in config['symbols']:
             runner.create_symbol_plots(symbol)
+            runner.create_returns_comparison_plots(symbol)
         
         runner.create_comparison_plots()
         
