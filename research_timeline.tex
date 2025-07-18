@@ -1,0 +1,265 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{pgfgantt}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tikz}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+
+\geometry{margin=1in}
+
+% Custom colors for different phases
+\definecolor{phase1}{RGB}{51, 122, 183}    % Blue - Foundation
+\definecolor{phase2}{RGB}{92, 184, 92}     % Green - Implementation  
+\definecolor{phase3}{RGB}{240, 173, 78}    % Orange - Evaluation
+\definecolor{phase4}{RGB}{217, 83, 79}     % Red - Analysis & Writing
+\definecolor{milestone}{RGB}{138, 43, 226} % Purple - Milestones
+
+\title{\textbf{Multi-Modal Stock TFT Research Project Timeline} \\ 
+       \large{Temporal Fusion Transformer for Stock Price Prediction}}
+\author{Research Timeline - July 2025}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Project Overview}
+
+This timeline represents the comprehensive research project on Multi-Modal Temporal Fusion Transformers (TFT) for stock price prediction, incorporating news sentiment, economic indicators, technical analysis, and market events data.
+
+\subsection{Research Objectives}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Primary:} Develop and evaluate a multi-modal TFT architecture for enhanced stock price prediction
+    \item \textbf{Secondary:} Compare TFT performance against traditional ML and deep learning baselines
+    \item \textbf{Tertiary:} Analyze model performance across different market conditions, sectors, and time periods
+\end{itemize}
+
+\section{Research Timeline - August 2025}
+
+\begin{center}
+\begin{ganttchart}[
+    canvas/.append style={fill=none, draw=black!5, line width=.75pt},
+    hgrid style/.style={draw=black!5, line width=.75pt},
+    vgrid={*1{draw=black!5, line width=.75pt}},
+    today=15,
+    today rule/.style={
+        draw=red,
+        dash pattern=on 3.5pt off 4.5pt,
+        line width=1.5pt
+    },
+    today label font=\small\bfseries,
+    title/.style={draw=none, fill=none},
+    title label font=\bfseries\footnotesize,
+    title label node/.append style={below=7pt},
+    include title in canvas=false,
+    bar label font=\mdseries\small\color{black!70},
+    bar label node/.append style={left=2cm},
+    bar/.append style={draw=none, fill=black!63},
+    bar incomplete/.append style={fill=barblue},
+    bar progress label font=\mdseries\footnotesize\color{black!70},
+    group incomplete/.append style={fill=groupblue},
+    group left shift=0,
+    group right shift=0,
+    group height=.5,
+    group peaks tip position=0,
+    group label node/.append style={left=.6cm},
+    group progress label font=\bfseries\small,
+    link/.style={-latex, line width=1.5pt, linkred},
+    link label font=\scriptsize\bfseries,
+    link label node/.append style={below left=-2pt and 0pt}
+]{1}{31}
+\gantttitle{\textbf{August 2025}}{31} \\
+\gantttitle{Week 1}{7} 
+\gantttitle{Week 2}{7} 
+\gantttitle{Week 3}{7} 
+\gantttitle{Week 4}{7}
+\gantttitle{W5}{3} \\
+
+% Phase 1: Baseline Implementation (Week 1)
+\ganttgroup[group/.append style={fill=phase1}]{\textbf{Phase 1: Baseline Implementation}}{1}{7} \\
+\ganttbar[bar/.append style={fill=phase1!80}]{LSTM Variants}{1}{3} \\
+\ganttbar[bar/.append style={fill=phase1!80}]{Transformer Models}{2}{4} \\
+\ganttbar[bar/.append style={fill=phase1!80}]{Traditional ML Models}{3}{5} \\
+\ganttbar[bar/.append style={fill=phase1!80}]{Financial Time Series Models}{4}{7} \\
+
+% Milestone 1
+\ganttmilestone[milestone/.append style={fill=milestone}]{Baseline Suite Complete}{7} \\
+
+% Phase 2: Comprehensive Evaluation (Week 2-3)
+\ganttgroup[group/.append style={fill=phase2}]{\textbf{Phase 2: Multi-Stock Evaluation}}{8}{21} \\
+\ganttbar[bar/.append style={fill=phase2!80}]{Tech Sector Analysis}{8}{10} \\
+\ganttbar[bar/.append style={fill=phase2!80}]{Financial Sector Analysis}{9}{11} \\
+\ganttbar[bar/.append style={fill=phase2!80}]{Healthcare \& Consumer}{10}{12} \\
+\ganttbar[bar/.append style={fill=phase2!80}]{Index Comparison (SPY, QQQ, DIA)}{13}{16} \\
+\ganttbar[bar/.append style={fill=phase2!80}]{Market Condition Analysis}{17}{21} \\
+
+% Milestone 2
+\ganttmilestone[milestone/.append style={fill=milestone}]{Multi-Stock Evaluation Complete}{21} \\
+
+% Phase 3: Statistical Analysis (Week 4)
+\ganttgroup[group/.append style={fill=phase3}]{\textbf{Phase 3: Statistical Analysis}}{22}{28} \\
+\ganttbar[bar/.append style={fill=phase3!80}]{Performance Metrics Calculation}{22}{24} \\
+\ganttbar[bar/.append style={fill=phase3!80}]{Statistical Significance Tests}{23}{25} \\
+\ganttbar[bar/.append style={fill=phase3!80}]{Ablation Study Analysis}{24}{26} \\
+\ganttbar[bar/.append style={fill=phase3!80}]{Results Visualization}{25}{28} \\
+
+% Phase 4: Paper Writing (Week 4-5)
+\ganttgroup[group/.append style={fill=phase4}]{\textbf{Phase 4: Paper Composition}}{26}{31} \\
+\ganttbar[bar/.append style={fill=phase4!80}]{Draft Sections 1-3}{26}{28} \\
+\ganttbar[bar/.append style={fill=phase4!80}]{Results \& Discussion}{27}{29} \\
+\ganttbar[bar/.append style={fill=phase4!80}]{Final Review \& Revision}{29}{31} \\
+
+% Final Milestone
+\ganttmilestone[milestone/.append style={fill=milestone}]{Paper Submission Ready}{31} \\
+
+% Links
+\ganttlink{elem1}{elem5}
+\ganttlink{elem5}{elem6}
+\ganttlink{elem10}{elem11}
+\ganttlink{elem14}{elem15}
+
+\end{ganttchart}
+\end{center}
+
+\section{Detailed Implementation Plan}
+
+\subsection{Phase 1: Baseline Model Implementation (Days 1-7)}
+
+\subsubsection{Traditional Machine Learning Models}
+\begin{itemize}
+    \item \textbf{Linear Models:} Ridge/Lasso Regression, Elastic Net
+    \item \textbf{Tree-based:} Random Forest, Extra Trees, XGBoost, LightGBM
+    \item \textbf{SVM:} Support Vector Regression with RBF/polynomial kernels
+    \item \textbf{Ensemble:} Voting/Stacking regressors
+\end{itemize}
+
+\subsubsection{Deep Learning Baselines}
+\begin{itemize}
+    \item \textbf{LSTM Variants:} Vanilla LSTM, Bidirectional LSTM, Stacked LSTM
+    \item \textbf{GRU Models:} Standard GRU, Bidirectional GRU
+    \item \textbf{CNN-LSTM:} Convolutional features + LSTM temporal modeling
+    \item \textbf{Transformer:} Standard encoder-only and encoder-decoder architectures
+\end{itemize}
+
+\subsubsection{Financial Time Series Models}
+\begin{itemize}
+    \item \textbf{Statistical:} ARIMA, GARCH, VAR models
+    \item \textbf{Regime-switching:} Markov Switching models
+    \item \textbf{Naive Baselines:} Random walk, moving averages, exponential smoothing
+\end{itemize}
+
+\subsection{Phase 2: Multi-Stock Evaluation (Days 8-21)}
+
+\subsubsection{Stock Categories}
+\begin{itemize}
+    \item \textbf{Technology:} AAPL, MSFT, GOOGL, NVDA, AMZN, TSLA
+    \item \textbf{Financial:} JPM, BAC, WFC, GS, MS, C
+    \item \textbf{Healthcare:} JNJ, PFE, UNH, MRCK, ABBV
+    \item \textbf{Consumer:} KO, PEP, WMT, PG, MCD
+    \item \textbf{Energy:} XOM, CVX, COP, EOG
+\end{itemize}
+
+\subsubsection{Market Indices}
+\begin{itemize}
+    \item \textbf{SPY:} S\&P 500 ETF - broad market representation
+    \item \textbf{QQQ:} NASDAQ-100 ETF - technology-heavy index
+    \item \textbf{DIA:} Dow Jones Industrial Average ETF
+    \item \textbf{IWM:} Russell 2000 ETF - small-cap representation
+\end{itemize}
+
+\subsubsection{Market Condition Analysis}
+\begin{itemize}
+    \item \textbf{Bull Markets:} 2020-2021 recovery, 2017 tech boom
+    \item \textbf{Bear Markets:} 2022 inflation crisis, COVID-19 crash
+    \item \textbf{Volatile Periods:} Election cycles, Fed policy changes
+    \item \textbf{Sector Rotations:} Growth vs. value transitions
+\end{itemize}
+
+\subsection{Phase 3: Statistical Analysis (Days 22-28)}
+
+\subsubsection{Performance Metrics}
+\begin{itemize}
+    \item \textbf{Accuracy:} MAE, RMSE, MAPE, directional accuracy
+    \item \textbf{Financial:} Sharpe ratio, maximum drawdown, alpha, beta
+    \item \textbf{Risk-adjusted:} Information ratio, Sortino ratio, Calmar ratio
+    \item \textbf{Trading:} Win rate, profit factor, total return
+\end{itemize}
+
+\subsubsection{Statistical Tests}
+\begin{itemize}
+    \item \textbf{Significance:} Diebold-Mariano test for forecast accuracy
+    \item \textbf{Stationarity:} Augmented Dickey-Fuller tests
+    \item \textbf{Model Comparison:} Friedman test with post-hoc analysis
+    \item \textbf{Risk Analysis:} Value-at-Risk, Expected Shortfall
+\end{itemize}
+
+\subsection{Phase 4: Paper Writing (Days 26-31)}
+
+\subsubsection{Paper Structure}
+\begin{enumerate}
+    \item \textbf{Introduction:} Problem motivation, contributions
+    \item \textbf{Related Work:} TFT background, financial ML review
+    \item \textbf{Methodology:} Multi-modal TFT architecture, data sources
+    \item \textbf{Experimental Setup:} Baselines, evaluation protocol
+    \item \textbf{Results:} Comprehensive comparison tables and figures
+    \item \textbf{Discussion:} Analysis, limitations, future work
+    \item \textbf{Conclusion:} Key findings and implications
+\end{enumerate}
+
+\section{Resource Requirements}
+
+\subsection{Computational Resources}
+\begin{itemize}
+    \item \textbf{Training:} GPU with 8GB+ VRAM for TFT models
+    \item \textbf{Baselines:} CPU sufficient for traditional ML models
+    \item \textbf{Storage:} 50GB+ for cached features and model checkpoints
+    \item \textbf{Memory:} 16GB+ RAM for large feature matrices
+\end{itemize}
+
+\subsection{Data Sources}
+\begin{itemize}
+    \item \textbf{Stock Data:} Yahoo Finance (via yfinance)
+    \item \textbf{News:} NewsAPI for sentiment analysis
+    \item \textbf{Economic:} FRED API for macroeconomic indicators
+    \item \textbf{Technical:} API Ninjas for additional market data
+\end{itemize}
+
+\section{Expected Deliverables}
+
+\begin{enumerate}
+    \item \textbf{Codebase:} Complete, documented implementation
+    \item \textbf{Results:} Comprehensive comparison tables and visualizations
+    \item \textbf{Paper:} 8-12 page research paper ready for submission
+    \item \textbf{Data:} Processed datasets and feature engineering pipeline
+    \item \textbf{Models:} Trained model checkpoints and evaluation scripts
+\end{enumerate}
+
+\section{Risk Mitigation}
+
+\subsection{Technical Risks}
+\begin{itemize}
+    \item \textbf{API Limits:} Implement caching and rate limiting
+    \item \textbf{Data Quality:} Robust preprocessing and validation
+    \item \textbf{Compute Limits:} Efficient batching and model optimization
+\end{itemize}
+
+\subsection{Timeline Risks}
+\begin{itemize}
+    \item \textbf{Model Training:} Parallel execution where possible
+    \item \textbf{Data Collection:} Pre-cached datasets available
+    \item \textbf{Buffer Time:} 2-3 days built into each phase
+\end{itemize}
+
+\vfill
+\begin{center}
+\textit{Timeline created: July 17, 2025 | Target completion: August 31, 2025}
+\end{center}
+
+\end{document}
