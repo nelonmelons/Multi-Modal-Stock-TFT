@@ -24,6 +24,20 @@ from typing import List, Optional, Dict, Tuple, Any
 from datetime import datetime, timedelta
 warnings.filterwarnings('ignore')
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+        print(f"✅ Loaded environment variables from {env_path}")
+    else:
+        print(f"ℹ️  No .env file found at {env_path}")
+        print("   You can create one from .env.example to set API keys")
+except ImportError:
+    print("⚠️  python-dotenv not installed. Install with: pip install python-dotenv")
+    print("   API keys will need to be set manually or via system environment variables")
+
 # Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -1449,7 +1463,29 @@ def main():
     parser.add_argument('--comparison-output-dir', type=str, default='comparison_results',
                         help='Output directory for comparison results')
     
+    # API key arguments (can override environment variables)
+    parser.add_argument('--news-api-key', type=str, default=None,
+                        help='NewsAPI key for news embeddings (overrides NEWS_API_KEY env var)')
+    parser.add_argument('--fred-api-key', type=str, default=None,
+                        help='FRED API key for economic data (overrides FRED_API_KEY env var)')
+    parser.add_argument('--api-ninjas-key', type=str, default=None,
+                        help='API-Ninjas key for earnings calendar (overrides API_NINJAS_KEY env var)')
+    
     args = parser.parse_args()
+    
+    # Load API keys from environment or command line arguments
+    news_api_key = args.news_api_key or os.getenv('NEWS_API_KEY')
+    fred_api_key = args.fred_api_key or os.getenv('FRED_API_KEY')
+    api_ninjas_key = args.api_ninjas_key or os.getenv('API_NINJAS_KEY')
+    
+    # Print API key status
+    print("🔑 API Key Status:")
+    print(f"   News API: {'✅ Set' if news_api_key else '❌ Not set'}")
+    print(f"   FRED API: {'✅ Set' if fred_api_key else '❌ Not set'}")
+    print(f"   API-Ninjas: {'✅ Set' if api_ninjas_key else '❌ Not set'}")
+    if not any([news_api_key, fred_api_key, api_ninjas_key]):
+        print("   💡 Create .env file from .env.example to set API keys")
+    print()
     
     # Handle out-of-sample validation
     train_symbols = args.symbols.split(',')
@@ -1497,9 +1533,9 @@ def main():
         'save_every': 5,
         'patience': 3,
         'device': 'mps' if torch.backends.mps.is_available() else 'cpu',
-        'news_api_key': None,
-        'fred_api_key': None,
-        'api_ninjas_key': None,
+        'news_api_key': news_api_key,
+        'fred_api_key': fred_api_key,
+        'api_ninjas_key': api_ninjas_key,
         'auto_continue': args.auto_continue,
         'enhanced_model': args.enhanced_model,
         # Validation leakage prevention

@@ -60,7 +60,19 @@ def compute_technical_indicators(df: pd.DataFrame, split_date: str = None,
         # CRITICAL FIX: Compute indicators with expanding window to prevent future leakage
         if split_date and not is_training:
             # For validation/test data, use expanding window from training period
-            split_dt = pd.to_datetime(split_date)
+            split_dt = pd.to_datetime(split_date, utc=True)
+            
+            # Ensure both datetime objects have the same timezone info
+            if symbol_df['date'].dt.tz is not None:
+                # If stock data has timezone, ensure split_dt matches
+                if split_dt.tz is None:
+                    split_dt = split_dt.tz_localize('UTC')
+                split_dt = split_dt.tz_convert(symbol_df['date'].dt.tz)
+            else:
+                # If stock data is naive, make split_dt naive too
+                if split_dt.tz is not None:
+                    split_dt = split_dt.tz_localize(None)
+            
             train_mask = symbol_df['date'] <= split_dt
             
             if train_mask.sum() < 10:
@@ -241,7 +253,19 @@ def fill_missing_temporal_safe(df: pd.DataFrame, split_date: str, is_training: b
     """Fill missing values without future information leakage."""
     if split_date and not is_training:
         # For validation data, only forward-fill within the validation period
-        split_dt = pd.to_datetime(split_date)
+        split_dt = pd.to_datetime(split_date, utc=True)
+        
+        # Ensure both datetime objects have the same timezone info
+        if df['date'].dt.tz is not None:
+            # If stock data has timezone, ensure split_dt matches
+            if split_dt.tz is None:
+                split_dt = split_dt.tz_localize('UTC')
+            split_dt = split_dt.tz_convert(df['date'].dt.tz)
+        else:
+            # If stock data is naive, make split_dt naive too
+            if split_dt.tz is not None:
+                split_dt = split_dt.tz_localize(None)
+        
         train_mask = df['date'] <= split_dt
         val_mask = df['date'] > split_dt
         
