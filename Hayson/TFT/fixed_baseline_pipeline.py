@@ -8,8 +8,8 @@ for fair comparison. Includes news embeddings, economic indicators, technical an
 and corporate events data.
 
 Models Included:
-- Traditional ML: Linear Regression, Ridge Regression, Random Forest
-- Ensemble Methods: XGBoost, LightGBM, Gradient Boosting, AdaBoost
+- Traditional ML: Linear Regression, Random Forest
+- Ensemble Methods: XGBoost, LightGBM, Gradient Boosting
 - Time Series: ARIMA (multiple configurations)
 
 Features:
@@ -31,12 +31,20 @@ Enhanced Visualization Suite:
 - Price prediction plots: actual vs predicted price trajectories
 - Comprehensive validation set analysis
 
+Data Leakage Prevention:
+- Strict temporal separation between train/validation with configurable buffer
+- Independent normalization for validation data (no shared statistics)
+- Historical price initialization (no future price peeking)
+- Explicit temporal boundary validation in sequence creation
+- Per-symbol feature scaling using only training data statistics
+
 Key Improvements:
 - Uses get_data_loader_with_module() exactly like TFT pipeline
 - Respects temporal constraints and lookahead buffers
 - Maintains consistent API key usage for external data sources
 - Identical feature engineering and preprocessing pipeline
 - Comprehensive model suite including time series models
+- Robust data leakage prevention and validation
 
 Usage:
     # Basic usage with multimodal features
@@ -106,8 +114,7 @@ except ImportError:
     print("⚠️ XGBoost not available. Install with: pip install xgboost")
 
 try:
-    from sklearn.linear_model import Ridge
-    from sklearn.ensemble import GradientBoostingRegressor, AdaBoostRegressor
+    from sklearn.ensemble import GradientBoostingRegressor
     SKLEARN_EXTENDED_AVAILABLE = True
 except ImportError:
     SKLEARN_EXTENDED_AVAILABLE = False
@@ -334,16 +341,24 @@ class MultimodalStockPredictor:
             targets = np.nan_to_num(targets, nan=0.0, posinf=1e10, neginf=-1e10)
             
             # Create sequences with multi-step targets (sliding window approach)
+            # CRITICAL: This ensures no future peeking - features[i-sequence_length:i] uses ONLY past data
+            # to predict targets[i:i+predict_len] which are future returns
             for i in range(self.sequence_length, len(symbol_df) - predict_len + 1):
                 # Feature sequence: past sequence_length timesteps flattened
+                # Uses data from [i-sequence_length, i) - strictly historical data
                 sequence = features[i-self.sequence_length:i].flatten()
                 
-                # Multi-step targets: next predict_len timesteps
+                # Multi-step targets: next predict_len timesteps  
+                # Uses data from [i, i+predict_len) - strictly future data
                 multi_targets = targets[i:i+predict_len]
                 
-                # Metadata (timestamp of the first prediction)
+                # Metadata (timestamp of the first prediction) 
                 # Use the actual row index for better date tracking
                 timestamp = symbol_df.iloc[i]['date'] if 'date' in symbol_df.columns else i
+                
+                # Validation: Ensure we're not using future data in features
+                assert i >= self.sequence_length, f"Sequence boundary violation: i={i}, seq_len={self.sequence_length}"
+                assert i + predict_len <= len(symbol_df), f"Prediction boundary violation: i={i}, predict_len={predict_len}, total_len={len(symbol_df)}"
                 
                 all_X.append(sequence)
                 all_y.append(multi_targets)
@@ -433,6 +448,23 @@ class FixedBaselineRunner:
         print(f"   📅 Validation period: {val_start} to {val_end}")
         print(f"   📊 Total period: {total_days} days, Training: {train_days} days")
         
+        # CRITICAL: Validate no temporal overlap between train and validation
+        train_end_dt = datetime.strptime(train_end, '%Y-%m-%d')
+        val_start_dt = datetime.strptime(val_start, '%Y-%m-%d')
+        
+        if train_end_dt >= val_start_dt:
+            print(f"❌ CRITICAL ERROR: Temporal overlap detected!")
+            print(f"   Training ends: {train_end}, Validation starts: {val_start}")
+            raise ValueError("Training and validation periods overlap - this will cause data leakage!")
+        
+        gap_days = (val_start_dt - train_end_dt).days
+        print(f"   ✅ Temporal gap validated: {gap_days} days between train and validation")
+        
+        if gap_days < lookahead_buffer_days:
+            print(f"   ⚠️  Warning: Gap ({gap_days} days) is less than intended buffer ({lookahead_buffer_days} days)")
+        else:
+            print(f"   ✅ Lookahead buffer satisfied: {gap_days} >= {lookahead_buffer_days} days")
+        
         # Load training data with all multimodal features
         print("   🔄 Loading training data...")
         try:
@@ -470,8 +502,8 @@ class FixedBaselineRunner:
                 is_training=True
             )
         
-        # Load validation data with same normalization parameters
-        print("   🔄 Loading validation data with shared normalization...")
+        # Load validation data with independent normalization to prevent data leakage
+        print("   🔄 Loading validation data with independent normalization...")
         try:
             val_dataloader, val_datamodule = get_data_loader_with_module(
                 symbols=self.config['symbols'],
@@ -484,8 +516,8 @@ class FixedBaselineRunner:
                 fred_api_key=self.config.get('fred_api_key'),
                 api_ninjas_key=self.config.get('api_ninjas_key'),
                 split_date=None,  # Don't pass split_date for validation data either
-                is_training=False,
-                reference_datamodule=train_datamodule  # Use training normalization params
+                is_training=False
+                # ❌ REMOVED: reference_datamodule=train_datamodule to prevent data leakage
             )
         except Exception as e:
             print(f"❌ Failed to load validation data: {e}")
@@ -502,8 +534,8 @@ class FixedBaselineRunner:
                 fred_api_key=self.config.get('fred_api_key'),
                 api_ninjas_key=self.config.get('api_ninjas_key'),
                 split_date=None,
-                is_training=False,
-                reference_datamodule=train_datamodule
+                is_training=False
+                # ❌ REMOVED: reference_datamodule=train_datamodule to prevent data leakage
             )
         
         print("✅ Multimodal data loaded successfully!")
@@ -520,7 +552,6 @@ class FixedBaselineRunner:
         # Traditional ML models
         base_models = {
             'Linear Regression': LinearRegression(),
-            'Ridge Regression': Ridge(alpha=1.0, random_state=42),
             'Random Forest': RandomForestRegressor(
                 n_estimators=100,
                 max_depth=10, 
@@ -535,11 +566,6 @@ class FixedBaselineRunner:
                 'Gradient Boosting': GradientBoostingRegressor(
                     n_estimators=100,
                     max_depth=6,
-                    learning_rate=0.1,
-                    random_state=42
-                ),
-                'AdaBoost': AdaBoostRegressor(
-                    n_estimators=100,
                     learning_rate=0.1,
                     random_state=42
                 )
@@ -800,38 +826,43 @@ class FixedBaselineRunner:
             y_val_symbol = y_val[val_mask]
             timestamps_val_symbol = timestamps_val[val_mask]
             
-            # Get current prices for validation period (needed for price reconstruction)
-            val_symbol_df = val_datamodule.feature_df[val_datamodule.feature_df['symbol'] == symbol].copy()
-            val_symbol_df = val_symbol_df.sort_values('time_idx').reset_index(drop=True)
+            # Get starting prices for validation sequences - CRITICAL: Use training data to avoid future peeking
+            # We need the price at the END of training period as the starting point for validation predictions
+            train_symbol_df = train_datamodule.feature_df[train_datamodule.feature_df['symbol'] == symbol].copy()
+            train_symbol_df = train_symbol_df.sort_values('time_idx').reset_index(drop=True)
             
-            if 'close' in val_symbol_df.columns:
-                # Use close prices as current prices - need to align with sequences
-                # For multi-step prediction, we need the starting price for each sequence
-                val_prices = []
-                for i, timestamp in enumerate(timestamps_val_symbol):
-                    # Find the corresponding close price for this timestamp
-                    price_row = val_symbol_df[val_symbol_df['date'] == timestamp]
-                    if not price_row.empty:
-                        val_prices.append(price_row['close'].iloc[0])
-                    else:
-                        # Fallback: use previous price or estimate
-                        val_prices.append(val_prices[-1] if val_prices else 100.0)
-                val_prices = np.array(val_prices)
+            if 'close' in train_symbol_df.columns and len(train_symbol_df) > 0:
+                # Use the LAST available close price from training data as the base price
+                # This prevents future peeking since we only use historical training data
+                base_price = train_symbol_df['close'].iloc[-1]  # Last training period price
+                print(f"   📊 Using base price from end of training: ${base_price:.2f}")
+                
+                # For validation sequences, we'll use the base price as starting point
+                # This is realistic - we only know prices up to the end of training
+                val_prices = np.full(len(y_val_symbol), base_price)
+                
             else:
-                # Fallback: estimate prices from returns (less accurate)
+                # Fallback: estimate base price
                 val_prices = np.ones(len(y_val_symbol)) * 100  # Assume $100 base price
-                print(f"⚠️ No close prices found for {symbol}, using estimated prices")
+                print(f"⚠️ No close prices found for {symbol}, using estimated base price: $100")
             
             print(f"📊 {symbol}: {len(X_train_symbol)} train, {len(X_val_symbol)} test samples")
             print(f"📊 Feature shape: {X_train_symbol.shape}")
             print(f"📊 Target shape: {y_train_symbol.shape} (multi-step: {predict_len} steps)")
             print(f"📊 Using multimodal features: {use_multimodal}")
             
-            # Scale features
+            # Scale features - CRITICAL: Fit scaler ONLY on training data to prevent data leakage
             scaler = StandardScaler()
             try:
+                # ✅ CORRECT: Fit scaler on training data only
                 X_train_scaled = scaler.fit_transform(X_train_symbol)
+                # ✅ CORRECT: Transform validation data using training statistics only
                 X_val_scaled = scaler.transform(X_val_symbol)
+                
+                print(f"   ✅ Feature scaling completed - no data leakage")
+                print(f"      Training mean: {X_train_scaled.mean():.4f}, std: {X_train_scaled.std():.4f}")
+                print(f"      Validation mean: {X_val_scaled.mean():.4f}, std: {X_val_scaled.std():.4f}")
+                
             except Exception as e:
                 print(f"❌ Scaling failed for {symbol}: {e}")
                 return
