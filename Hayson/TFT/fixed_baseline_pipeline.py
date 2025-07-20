@@ -22,6 +22,15 @@ Features:
 - Creates comprehensive evaluation metrics and visualizations per symbol
 - Fair comparison with TFT model using identical feature sets and data splits
 
+Enhanced Visualization Suite:
+- Original performance metrics plots (classification, regression, financial)
+- Enhanced prediction plots: predicted vs actual scatter plots
+- Error over horizon analysis: MAE/RMSE trends across forecast horizons
+- Residual analysis: error distributions, Q-Q plots, time series residuals
+- Directional accuracy tracking: % up/down predictions correct over horizons
+- Price prediction plots: actual vs predicted price trajectories
+- Comprehensive validation set analysis
+
 Key Improvements:
 - Uses get_data_loader_with_module() exactly like TFT pipeline
 - Respects temporal constraints and lookahead buffers
@@ -62,6 +71,14 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, accuracy_score, balanced_accuracy_score, f1_score, roc_auc_score
+
+# Try to import scipy for statistical analysis
+try:
+    from scipy import stats
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    print("⚠️ SciPy not available. Some statistical plots may be limited. Install with: pip install scipy")
 
 # Setup paths and suppress warnings
 warnings.filterwarnings('ignore')
@@ -864,6 +881,592 @@ class FixedBaselineRunner:
             print(f"   Traceback: {traceback.format_exc()}")
             return
     
+    def create_enhanced_prediction_plots(self, symbol: str):
+        """Create enhanced prediction plots with detailed analysis for validation test set."""
+        if symbol not in self.results or len(self.results[symbol]) == 0:
+            print(f"⚠️ No results to create enhanced plots for {symbol}")
+            return
+            
+        print(f"📊 Creating enhanced prediction plots for {symbol}...")
+        
+        symbol_results = self.results[symbol]
+        n_models = len(symbol_results)
+        
+        try:
+            # Create comprehensive plots: 2x2 grid for each type of analysis
+            fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+            fig.suptitle(f'{symbol} - Enhanced Prediction Analysis (Validation Set)', fontsize=16, fontweight='bold')
+            
+            # Colors for different models
+            colors = plt.cm.Set1(np.linspace(0, 1, n_models))
+            
+            # Get predict_len from first model
+            first_result = list(symbol_results.values())[0]
+            predict_len = first_result['predictions'].shape[1]
+            horizons = np.arange(1, predict_len + 1)
+            
+            # 1. Predicted vs Actual Returns/Prices
+            ax1 = axes[0, 0]
+            ax1.set_title('Predicted vs Actual Final Returns')
+            ax1.set_xlabel('Actual Returns')
+            ax1.set_ylabel('Predicted Returns')
+            
+            for i, (model_name, result) in enumerate(symbol_results.items()):
+                predictions = result['predictions']
+                actuals = result['actuals']
+                
+                # Calculate cumulative returns over prediction horizon
+                actual_cumulative = np.sum(actuals, axis=1)
+                predicted_cumulative = np.sum(predictions, axis=1)
+                
+                # Scatter plot
+                ax1.scatter(actual_cumulative, predicted_cumulative, 
+                           alpha=0.6, label=model_name, color=colors[i], s=20)
+            
+            # Add perfect prediction line
+            min_val = min([np.min(np.sum(result['actuals'], axis=1)) for result in symbol_results.values()])
+            max_val = max([np.max(np.sum(result['actuals'], axis=1)) for result in symbol_results.values()])
+            ax1.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='Perfect Prediction')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # 2. Error Over Horizon (MAE and RMSE by forecast step)
+            ax2 = axes[0, 1]
+            ax2.set_title('Error Over Forecast Horizon')
+            ax2.set_xlabel('Forecast Horizon (Days)')
+            ax2.set_ylabel('Error')
+            
+            for i, (model_name, result) in enumerate(symbol_results.items()):
+                predictions = result['predictions']
+                actuals = result['actuals']
+                
+                # Calculate MAE and RMSE for each horizon step
+                mae_by_horizon = []
+                rmse_by_horizon = []
+                
+                for h in range(predict_len):
+                    mae_h = mean_absolute_error(actuals[:, h], predictions[:, h])
+                    rmse_h = np.sqrt(mean_squared_error(actuals[:, h], predictions[:, h]))
+                    mae_by_horizon.append(mae_h)
+                    rmse_by_horizon.append(rmse_h)
+                
+                # Plot MAE and RMSE lines
+                ax2.plot(horizons, mae_by_horizon, '-', color=colors[i], 
+                        label=f'{model_name} (MAE)', linewidth=2, alpha=0.8)
+                ax2.plot(horizons, rmse_by_horizon, '--', color=colors[i], 
+                        label=f'{model_name} (RMSE)', linewidth=2, alpha=0.8)
+            
+            ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax2.grid(True, alpha=0.3)
+            ax2.set_xticks(horizons)
+            
+            # 3. Residual Plots (Errors vs Predicted Values)
+            ax3 = axes[1, 0]
+            ax3.set_title('Residuals vs Predicted Values')
+            ax3.set_xlabel('Predicted Returns')
+            ax3.set_ylabel('Residuals (Actual - Predicted)')
+            
+            for i, (model_name, result) in enumerate(symbol_results.items()):
+                predictions = result['predictions']
+                actuals = result['actuals']
+                
+                # Flatten for residual analysis
+                pred_flat = predictions.flatten()
+                actual_flat = actuals.flatten()
+                residuals = actual_flat - pred_flat
+                
+                # Scatter plot of residuals
+                ax3.scatter(pred_flat, residuals, alpha=0.5, label=model_name, 
+                           color=colors[i], s=15)
+            
+            # Add zero line
+            ax3.axhline(y=0, color='k', linestyle='-', alpha=0.5)
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            
+            # 4. Directional Accuracy Over Horizon
+            ax4 = axes[1, 1]
+            ax4.set_title('Directional Accuracy Over Forecast Horizon')
+            ax4.set_xlabel('Forecast Horizon (Days)')
+            ax4.set_ylabel('Directional Accuracy (%)')
+            
+            for i, (model_name, result) in enumerate(symbol_results.items()):
+                predictions = result['predictions']
+                actuals = result['actuals']
+                
+                # Calculate directional accuracy for each horizon
+                directional_accuracy = []
+                
+                for h in range(predict_len):
+                    actual_direction = (actuals[:, h] > 0).astype(int)
+                    predicted_direction = (predictions[:, h] > 0).astype(int)
+                    accuracy = accuracy_score(actual_direction, predicted_direction) * 100
+                    directional_accuracy.append(accuracy)
+                
+                # Plot directional accuracy
+                ax4.plot(horizons, directional_accuracy, '-o', color=colors[i], 
+                        label=model_name, linewidth=2, markersize=6, alpha=0.8)
+            
+            # Add 50% baseline (random guessing)
+            ax4.axhline(y=50, color='k', linestyle='--', alpha=0.5, label='Random Baseline (50%)')
+            ax4.legend()
+            ax4.grid(True, alpha=0.3)
+            ax4.set_xticks(horizons)
+            ax4.set_ylim(30, 80)  # Focus on reasonable range
+            
+            plt.tight_layout()
+            plot_path = self.output_dir / f"{symbol}_enhanced_predictions.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📈 {symbol} enhanced prediction plots saved to {plot_path}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create enhanced prediction plots for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def create_detailed_residual_analysis(self, symbol: str):
+        """Create detailed residual analysis plots including time series residuals."""
+        if symbol not in self.results or len(self.results[symbol]) == 0:
+            print(f"⚠️ No results for residual analysis for {symbol}")
+            return
+            
+        print(f"📊 Creating detailed residual analysis for {symbol}...")
+        
+        symbol_results = self.results[symbol]
+        n_models = len(symbol_results)
+        
+        try:
+            # Create residual analysis plots: 3x2 grid
+            fig, axes = plt.subplots(3, 2, figsize=(20, 18))
+            fig.suptitle(f'{symbol} - Detailed Residual Analysis', fontsize=16, fontweight='bold')
+            
+            colors = plt.cm.Set1(np.linspace(0, 1, n_models))
+            
+            # Get predict_len from first model
+            first_result = list(symbol_results.values())[0]
+            predict_len = first_result['predictions'].shape[1]
+            
+            for i, (model_name, result) in enumerate(symbol_results.items()):
+                predictions = result['predictions']
+                actuals = result['actuals']
+                timestamps = result['timestamps']
+                
+                # Calculate residuals for different horizons
+                residuals_by_horizon = []
+                for h in range(predict_len):
+                    residuals_h = actuals[:, h] - predictions[:, h]
+                    residuals_by_horizon.append(residuals_h)
+                
+                # 1. Residuals over time (for first forecast horizon)
+                if i < 3:  # Only show first 3 models to avoid clutter
+                    ax = axes[0, 0] if i < 2 else axes[0, 1]
+                    if i == 0:
+                        ax.set_title('Residuals Over Time (1-Day Horizon)')
+                        ax.set_xlabel('Sample Index')
+                        ax.set_ylabel('Residuals')
+                    
+                    ax.plot(residuals_by_horizon[0], color=colors[i], 
+                           label=model_name, alpha=0.7, linewidth=1)
+                    ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+                    ax.legend()
+                    ax.grid(True, alpha=0.3)
+                
+                # 2. Residual distribution (histogram)
+                if i < 3:
+                    ax = axes[1, 0] if i < 2 else axes[1, 1]
+                    if i == 0:
+                        ax.set_title('Residual Distribution')
+                        ax.set_xlabel('Residuals')
+                        ax.set_ylabel('Frequency')
+                    
+                    all_residuals = np.concatenate(residuals_by_horizon)
+                    ax.hist(all_residuals, bins=30, alpha=0.6, color=colors[i], 
+                           label=model_name, density=True)
+                    ax.axvline(x=0, color='k', linestyle='-', alpha=0.3)
+                    ax.legend()
+                    ax.grid(True, alpha=0.3)
+                
+                # 3. Q-Q plot for normality check
+                if i < 2:
+                    ax = axes[2, i]
+                    ax.set_title(f'{model_name} - Q-Q Plot (Normality Check)')
+                    ax.set_xlabel('Theoretical Quantiles')
+                    ax.set_ylabel('Sample Quantiles')
+                    
+                    all_residuals = np.concatenate(residuals_by_horizon)
+                    
+                    if SCIPY_AVAILABLE:
+                        stats.probplot(all_residuals, dist="norm", plot=ax)
+                    else:
+                        # Fallback: simple histogram instead of Q-Q plot
+                        ax.hist(all_residuals, bins=20, alpha=0.7, density=True)
+                        ax.set_title(f'{model_name} - Residual Distribution (SciPy not available)')
+                        ax.set_ylabel('Density')
+                    
+                    ax.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plot_path = self.output_dir / f"{symbol}_residual_analysis.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📈 {symbol} residual analysis saved to {plot_path}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create residual analysis for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def create_horizon_error_analysis(self, symbol: str):
+        """Create comprehensive error analysis over forecast horizons."""
+        if symbol not in self.results or len(self.results[symbol]) == 0:
+            print(f"⚠️ No results for horizon error analysis for {symbol}")
+            return
+            
+        print(f"📊 Creating horizon error analysis for {symbol}...")
+        
+        symbol_results = self.results[symbol]
+        n_models = len(symbol_results)
+        
+        try:
+            # Create comprehensive horizon analysis: 2x2 grid
+            fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+            fig.suptitle(f'{symbol} - Error Analysis Over Forecast Horizons', fontsize=16, fontweight='bold')
+            
+            colors = plt.cm.Set1(np.linspace(0, 1, n_models))
+            
+            # Get predict_len from first model
+            first_result = list(symbol_results.values())[0]
+            predict_len = first_result['predictions'].shape[1]
+            horizons = np.arange(1, predict_len + 1)
+            
+            # Prepare data structures for analysis
+            model_metrics_by_horizon = {}
+            
+            for model_name, result in symbol_results.items():
+                predictions = result['predictions']
+                actuals = result['actuals']
+                
+                # Calculate metrics for each horizon
+                mae_by_horizon = []
+                rmse_by_horizon = []
+                directional_accuracy = []
+                correlation_by_horizon = []
+                
+                for h in range(predict_len):
+                    # Error metrics
+                    mae_h = mean_absolute_error(actuals[:, h], predictions[:, h])
+                    rmse_h = np.sqrt(mean_squared_error(actuals[:, h], predictions[:, h]))
+                    
+                    # Directional accuracy
+                    actual_direction = (actuals[:, h] > 0).astype(int)
+                    predicted_direction = (predictions[:, h] > 0).astype(int)
+                    dir_acc = accuracy_score(actual_direction, predicted_direction) * 100
+                    
+                    # Correlation
+                    corr = np.corrcoef(actuals[:, h], predictions[:, h])[0, 1]
+                    if np.isnan(corr):
+                        corr = 0.0
+                    
+                    mae_by_horizon.append(mae_h)
+                    rmse_by_horizon.append(rmse_h)
+                    directional_accuracy.append(dir_acc)
+                    correlation_by_horizon.append(corr)
+                
+                model_metrics_by_horizon[model_name] = {
+                    'mae': mae_by_horizon,
+                    'rmse': rmse_by_horizon,
+                    'directional_accuracy': directional_accuracy,
+                    'correlation': correlation_by_horizon
+                }
+            
+            # 1. MAE and RMSE Over Horizon
+            ax1 = axes[0, 0]
+            ax1.set_title('Mean Absolute Error (MAE) Over Forecast Horizon')
+            ax1.set_xlabel('Forecast Horizon (Days)')
+            ax1.set_ylabel('MAE')
+            
+            for i, (model_name, metrics) in enumerate(model_metrics_by_horizon.items()):
+                ax1.plot(horizons, metrics['mae'], '-o', color=colors[i], 
+                        label=model_name, linewidth=2, markersize=6, alpha=0.8)
+            
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            ax1.set_xticks(horizons)
+            
+            # 2. RMSE Over Horizon
+            ax2 = axes[0, 1]
+            ax2.set_title('Root Mean Square Error (RMSE) Over Forecast Horizon')
+            ax2.set_xlabel('Forecast Horizon (Days)')
+            ax2.set_ylabel('RMSE')
+            
+            for i, (model_name, metrics) in enumerate(model_metrics_by_horizon.items()):
+                ax2.plot(horizons, metrics['rmse'], '-s', color=colors[i], 
+                        label=model_name, linewidth=2, markersize=6, alpha=0.8)
+            
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            ax2.set_xticks(horizons)
+            
+            # 3. Directional Accuracy Over Horizon
+            ax3 = axes[1, 0]
+            ax3.set_title('Directional Accuracy (% Up/Down Correct) Over Horizon')
+            ax3.set_xlabel('Forecast Horizon (Days)')
+            ax3.set_ylabel('Directional Accuracy (%)')
+            
+            for i, (model_name, metrics) in enumerate(model_metrics_by_horizon.items()):
+                ax3.plot(horizons, metrics['directional_accuracy'], '-^', color=colors[i], 
+                        label=model_name, linewidth=2, markersize=6, alpha=0.8)
+            
+            # Add 50% baseline (random guessing)
+            ax3.axhline(y=50, color='k', linestyle='--', alpha=0.5, label='Random Baseline (50%)')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            ax3.set_xticks(horizons)
+            ax3.set_ylim(30, 80)
+            
+            # 4. Correlation Over Horizon
+            ax4 = axes[1, 1]
+            ax4.set_title('Prediction Correlation Over Forecast Horizon')
+            ax4.set_xlabel('Forecast Horizon (Days)')
+            ax4.set_ylabel('Correlation Coefficient')
+            
+            for i, (model_name, metrics) in enumerate(model_metrics_by_horizon.items()):
+                ax4.plot(horizons, metrics['correlation'], '-d', color=colors[i], 
+                        label=model_name, linewidth=2, markersize=6, alpha=0.8)
+            
+            ax4.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+            ax4.legend()
+            ax4.grid(True, alpha=0.3)
+            ax4.set_xticks(horizons)
+            ax4.set_ylim(-0.2, 1.0)
+            
+            plt.tight_layout()
+            plot_path = self.output_dir / f"{symbol}_horizon_error_analysis.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📈 {symbol} horizon error analysis saved to {plot_path}")
+            
+            # Print summary statistics
+            print(f"\n📊 {symbol} - Horizon Error Analysis Summary:")
+            for model_name, metrics in model_metrics_by_horizon.items():
+                avg_mae = np.mean(metrics['mae'])
+                avg_rmse = np.mean(metrics['rmse'])
+                avg_dir_acc = np.mean(metrics['directional_accuracy'])
+                avg_corr = np.mean(metrics['correlation'])
+                
+                print(f"  {model_name}:")
+                print(f"    Avg MAE: {avg_mae:.4f}, Avg RMSE: {avg_rmse:.4f}")
+                print(f"    Avg Directional Accuracy: {avg_dir_acc:.1f}%")
+                print(f"    Avg Correlation: {avg_corr:.3f}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create horizon error analysis for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def create_price_prediction_plots(self, symbol: str):
+        """Create detailed price prediction plots showing actual vs predicted prices over time."""
+        if symbol not in self.results or len(self.results[symbol]) == 0:
+            print(f"⚠️ No results for price prediction plots for {symbol}")
+            return
+            
+        print(f"📊 Creating price prediction plots for {symbol}...")
+        
+        symbol_results = self.results[symbol]
+        n_models = len(symbol_results)
+        
+        try:
+            # Create comprehensive price analysis: 2x2 grid
+            fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+            fig.suptitle(f'{symbol} - Price Prediction Analysis (Validation Set)', fontsize=16, fontweight='bold')
+            
+            colors = plt.cm.Set1(np.linspace(0, 1, n_models))
+            
+            # Get first result for reference
+            first_result = list(symbol_results.values())[0]
+            predict_len = first_result['predictions'].shape[1]
+            timestamps = first_result['timestamps']
+            prices = first_result['prices']
+            actuals = first_result['actuals']
+            
+            # 1. Price Trajectories for First N Samples
+            ax1 = axes[0, 0]
+            ax1.set_title('Price Trajectories - First 10 Validation Samples')
+            ax1.set_xlabel('Days into Forecast')
+            ax1.set_ylabel('Price ($)')
+            
+            n_samples_to_show = min(10, len(actuals))
+            days = np.arange(predict_len + 1)  # Include starting point
+            
+            for sample_idx in range(n_samples_to_show):
+                start_price = prices[sample_idx]
+                actual_returns = actuals[sample_idx]
+                
+                # Calculate actual price trajectory
+                actual_prices = [start_price]
+                current_price = start_price
+                for ret in actual_returns:
+                    current_price = current_price * (1 + ret)
+                    actual_prices.append(current_price)
+                
+                # Plot actual trajectory
+                ax1.plot(days, actual_prices, 'b-', alpha=0.3, linewidth=1)
+                
+                # Plot predicted trajectories for each model
+                for i, (model_name, result) in enumerate(symbol_results.items()):
+                    if sample_idx == 0:  # Only add label once
+                        predicted_returns = result['predictions'][sample_idx]
+                        pred_prices = [start_price]
+                        current_price = start_price
+                        for ret in predicted_returns:
+                            current_price = current_price * (1 + ret)
+                            pred_prices.append(current_price)
+                        
+                        ax1.plot(days, pred_prices, '--', color=colors[i], 
+                                alpha=0.7, linewidth=2, label=f'{model_name} Pred')
+                    else:
+                        predicted_returns = result['predictions'][sample_idx]
+                        pred_prices = [start_price]
+                        current_price = start_price
+                        for ret in predicted_returns:
+                            current_price = current_price * (1 + ret)
+                            pred_prices.append(current_price)
+                        
+                        ax1.plot(days, pred_prices, '--', color=colors[i], 
+                                alpha=0.7, linewidth=2)
+            
+            # Add legend items for actual
+            ax1.plot([], [], 'b-', alpha=0.7, linewidth=2, label='Actual')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # 2. Final Price Scatter Plot (Actual vs Predicted)
+            ax2 = axes[0, 1]
+            ax2.set_title('Final Price Predictions (End of Forecast Period)')
+            ax2.set_xlabel('Actual Final Price ($)')
+            ax2.set_ylabel('Predicted Final Price ($)')
+            
+            for i, (model_name, result) in enumerate(symbol_results.items()):
+                predictions = result['predictions']
+                actuals_data = result['actuals']
+                prices_data = result['prices']
+                
+                # Calculate final prices
+                actual_final_prices = []
+                predicted_final_prices = []
+                
+                for j in range(len(predictions)):
+                    start_price = prices_data[j]
+                    
+                    # Actual final price
+                    actual_final = start_price * np.prod(1 + actuals_data[j])
+                    
+                    # Predicted final price
+                    predicted_final = start_price * np.prod(1 + predictions[j])
+                    
+                    actual_final_prices.append(actual_final)
+                    predicted_final_prices.append(predicted_final)
+                
+                # Scatter plot
+                ax2.scatter(actual_final_prices, predicted_final_prices, 
+                           alpha=0.6, label=model_name, color=colors[i], s=30)
+                
+                # Calculate and display correlation
+                corr = np.corrcoef(actual_final_prices, predicted_final_prices)[0, 1]
+                print(f"  {model_name} - Final Price Correlation: {corr:.3f}")
+            
+            # Add perfect prediction line
+            all_actual = []
+            for result in symbol_results.values():
+                prices_data = result['prices']
+                actuals_data = result['actuals']
+                for j in range(len(actuals_data)):
+                    start_price = prices_data[j]
+                    actual_final = start_price * np.prod(1 + actuals_data[j])
+                    all_actual.append(actual_final)
+            
+            min_price = min(all_actual)
+            max_price = max(all_actual)
+            ax2.plot([min_price, max_price], [min_price, max_price], 'k--', alpha=0.5, label='Perfect Prediction')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            
+            # 3. Cumulative Returns Comparison
+            ax3 = axes[1, 0]
+            ax3.set_title('Cumulative Returns Over Validation Period')
+            ax3.set_xlabel('Sample Index')
+            ax3.set_ylabel('Cumulative Return (%)')
+            
+            for i, (model_name, result) in enumerate(symbol_results.items()):
+                predictions = result['predictions']
+                actuals_data = result['actuals']
+                
+                # Calculate cumulative returns for each sample
+                actual_cumulative = np.cumsum(np.sum(actuals_data, axis=1)) * 100
+                predicted_cumulative = np.cumsum(np.sum(predictions, axis=1)) * 100
+                
+                sample_indices = np.arange(len(actual_cumulative))
+                
+                if i == 0:  # Plot actual only once
+                    ax3.plot(sample_indices, actual_cumulative, 'k-', 
+                            linewidth=3, label='Actual', alpha=0.8)
+                
+                ax3.plot(sample_indices, predicted_cumulative, '--', 
+                        color=colors[i], linewidth=2, label=f'{model_name} Pred', alpha=0.8)
+            
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            ax3.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+            
+            # 4. Price Prediction Error Distribution
+            ax4 = axes[1, 1]
+            ax4.set_title('Price Prediction Error Distribution')
+            ax4.set_xlabel('Price Prediction Error ($)')
+            ax4.set_ylabel('Density')
+            
+            for i, (model_name, result) in enumerate(symbol_results.items()):
+                predictions = result['predictions']
+                actuals_data = result['actuals']
+                prices_data = result['prices']
+                
+                # Calculate price errors
+                price_errors = []
+                for j in range(len(predictions)):
+                    start_price = prices_data[j]
+                    actual_final = start_price * np.prod(1 + actuals_data[j])
+                    predicted_final = start_price * np.prod(1 + predictions[j])
+                    error = predicted_final - actual_final
+                    price_errors.append(error)
+                
+                # Plot histogram
+                ax4.hist(price_errors, bins=30, alpha=0.6, color=colors[i], 
+                        label=model_name, density=True)
+                
+                # Print error statistics
+                mae_price = np.mean(np.abs(price_errors))
+                rmse_price = np.sqrt(np.mean(np.array(price_errors)**2))
+                print(f"  {model_name} - Price MAE: ${mae_price:.2f}, Price RMSE: ${rmse_price:.2f}")
+            
+            ax4.axvline(x=0, color='k', linestyle='-', alpha=0.5)
+            ax4.legend()
+            ax4.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plot_path = self.output_dir / f"{symbol}_price_predictions.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📈 {symbol} price prediction plots saved to {plot_path}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create price prediction plots for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+
     def create_symbol_plots(self, symbol: str):
         """Create plots for a specific symbol showing Classification, Regression, Financial metrics, and Price Comparisons."""
         if symbol not in self.results or len(self.results[symbol]) == 0:
@@ -1504,8 +2107,16 @@ def main():
         print("=" * 60)
         
         for symbol in config['symbols']:
+            # Original plots
             runner.create_symbol_plots(symbol)
             runner.create_returns_comparison_plots(symbol)
+            
+            # New enhanced prediction analysis plots
+            print(f"\n🎯 Creating enhanced prediction analysis for {symbol}...")
+            runner.create_enhanced_prediction_plots(symbol)
+            runner.create_horizon_error_analysis(symbol)
+            runner.create_detailed_residual_analysis(symbol)
+            runner.create_price_prediction_plots(symbol)
         
         runner.create_comparison_plots()
         
@@ -1516,6 +2127,22 @@ def main():
         print(f"📂 Results saved to: {runner.output_dir}")
         print(f"🎯 Features used: {'Multimodal (news, economic, technical, OHLCV)' if use_multimodal else 'Basic OHLCV only'}")
         print(f"🔮 Prediction mode: Fixed {config['predict_len']}-step horizon")
+        
+        # Summary of generated plots
+        print(f"\n📊 Generated Plots Summary:")
+        print(f"   📈 Performance metrics plots: {len(config['symbols'])} symbols")
+        print(f"   📈 Enhanced prediction analysis: {len(config['symbols'])} symbols")
+        print(f"   📈 Horizon error analysis: {len(config['symbols'])} symbols")
+        print(f"   📈 Detailed residual analysis: {len(config['symbols'])} symbols")
+        print(f"   📈 Price prediction plots: {len(config['symbols'])} symbols")
+        print(f"   📈 Returns comparison plots: {len(config['symbols'])} symbols")
+        print(f"   📈 Cross-model comparison plots: 1 summary")
+        print(f"\n🎯 Key Plot Features:")
+        print(f"   ✅ Predicted vs Actual prices/returns for validation set")
+        print(f"   ✅ Error over horizon (MAE/RMSE trends)")
+        print(f"   ✅ Residual plots (errors vs time & predicted values)")
+        print(f"   ✅ Directional accuracy (% Up/Down correct) over horizons")
+        print(f"   ✅ Comprehensive validation set analysis")
         
     except Exception as e:
         print(f"\n❌ Pipeline failed: {e}")
