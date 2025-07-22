@@ -20,8 +20,18 @@ import sys
 import argparse
 import warnings
 import shutil
+import traceback
+import json
+import glob
 from typing import List, Optional, Dict, Tuple, Any
 from datetime import datetime, timedelta
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, accuracy_score, balanced_accuracy_score, f1_score, roc_auc_score
 warnings.filterwarnings('ignore')
 
 # Load environment variables from .env file
@@ -52,6 +62,14 @@ import seaborn as sns
 from tqdm import tqdm
 import json
 from pathlib import Path
+
+# Try to import scipy for statistical analysis
+try:
+    from scipy import stats
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    print("⚠️ SciPy not available. Some statistical plots may be limited. Install with: pip install scipy")
 
 # Import our modules
 from dataModule.interface import get_data_loader_with_module
@@ -651,20 +669,66 @@ class TFTTrainer:
         return predictions, targets
     
     def create_comprehensive_analysis(self, predictions: np.ndarray, targets: np.ndarray, datamodule: Any, prefix: str = "") -> None:
-        """Create comprehensive analysis plots and reports."""
+        """Create comprehensive analysis plots and reports matching baseline pipeline exactly."""
         print("\n📊 Creating comprehensive analysis...")
         
         # Set style
         plt.style.use('seaborn-v0_8')
         sns.set_palette("husl")
         
-        # Calculate metrics
-        metrics = self.calculate_metrics(predictions, targets)
+        # Get symbol name for plots
+        symbol = "TFT"
+        if hasattr(datamodule, 'feature_df') and 'symbol' in datamodule.feature_df.columns:
+            symbols = datamodule.feature_df['symbol'].unique()
+            if len(symbols) > 0:
+                symbol = symbols[0]  # Use first symbol if multiple
+        
+        # Extract current prices if available
+        current_prices = None
+        if hasattr(datamodule, 'feature_df') and 'close' in datamodule.feature_df.columns:
+            # Use close prices as current prices for price reconstruction
+            close_prices = datamodule.feature_df['close'].values
+            if len(close_prices) >= len(predictions):
+                current_prices = close_prices[-len(predictions):]  # Use last N prices
+        
+        # Extract timestamps if available
+        timestamps = None
+        if hasattr(datamodule, 'feature_df') and 'date' in datamodule.feature_df.columns:
+            dates = datamodule.feature_df['date'].values
+            if len(dates) >= len(predictions):
+                timestamps = dates[-len(predictions):]  # Use last N dates
+        
+        # Calculate comprehensive metrics with price information
+        metrics = self.calculate_metrics(predictions, targets, current_prices)
         
         # Analyze feature importance
         feature_analysis = self.analyze_feature_importance(datamodule.train_dataloader(), datamodule)
         
-        # Create analysis plots
+        # === CREATE ALL BASELINE-COMPATIBLE PLOTS ===
+        print("\n📊 Creating baseline-compatible visualizations...")
+        
+        # 1. Enhanced prediction plots (matching baseline exactly)
+        self.create_enhanced_prediction_plots(predictions, targets, timestamps, symbol)
+        
+        # 2. Detailed residual analysis 
+        self.create_detailed_residual_analysis(predictions, targets, timestamps, symbol)
+        
+        # 3. Horizon error analysis
+        self.create_horizon_error_analysis(predictions, targets, timestamps, symbol)
+        
+        # 4. Price prediction plots
+        self.create_price_prediction_plots(predictions, targets, current_prices, timestamps, symbol)
+        
+        # 5. Performance metrics plots (Classification, Regression, Financial)
+        self.create_symbol_plots(predictions, targets, metrics, current_prices, timestamps, symbol)
+        
+        # 6. Returns comparison plots
+        self.create_returns_comparison_plots(predictions, targets, timestamps, symbol)
+        
+        # === ORIGINAL TFT PLOTS (for backward compatibility) ===
+        print("\n📊 Creating original TFT visualizations...")
+        
+        # Create original analysis plots
         self.plot_training_progress()
         self.plot_prediction_analysis(predictions, targets)
         self.plot_model_performance(predictions, targets, metrics)
@@ -683,6 +747,21 @@ class TFTTrainer:
             # Copy key plots with prefix
             import shutil
             try:
+                # Copy baseline-compatible plots
+                shutil.copy2(self.plots_dir / f'{symbol}_enhanced_predictions.png', 
+                           self.plots_dir / f'{prefix}_{symbol}_enhanced_predictions.png')
+                shutil.copy2(self.plots_dir / f'{symbol}_residual_analysis.png', 
+                           self.plots_dir / f'{prefix}_{symbol}_residual_analysis.png')
+                shutil.copy2(self.plots_dir / f'{symbol}_horizon_error_analysis.png', 
+                           self.plots_dir / f'{prefix}_{symbol}_horizon_error_analysis.png')
+                shutil.copy2(self.plots_dir / f'{symbol}_price_predictions.png', 
+                           self.plots_dir / f'{prefix}_{symbol}_price_predictions.png')
+                shutil.copy2(self.plots_dir / f'{symbol}_performance_metrics.png', 
+                           self.plots_dir / f'{prefix}_{symbol}_performance_metrics.png')
+                shutil.copy2(self.plots_dir / f'{symbol}_returns_comparison.png', 
+                           self.plots_dir / f'{prefix}_{symbol}_returns_comparison.png')
+                
+                # Copy original TFT plots
                 shutil.copy2(self.plots_dir / 'trading_overview.png', 
                            self.plots_dir / f'{prefix}_trading_overview.png')
                 shutil.copy2(self.plots_dir / 'portfolio_comparison.png', 
@@ -697,7 +776,24 @@ class TFTTrainer:
             except Exception as e:
                 print(f"Warning: Could not copy plots with prefix: {e}")
         
-        print(f"✅ Analysis completed! Results saved in {self.plots_dir}")
+        # Print comprehensive summary
+        print(f"\n📊 Comprehensive Analysis Summary:")
+        print(f"   🎯 Symbol: {symbol}")
+        print(f"   📈 Total plots generated: 12+ visualizations")
+        print(f"   📊 Baseline-compatible plots: 6 analysis types")
+        print(f"   🔍 Original TFT plots: 6 analysis types")
+        print(f"   📋 Metrics calculated: {len(metrics)} performance indicators")
+        print(f"   💾 Results directory: {self.plots_dir}")
+        
+        print(f"\n🎯 Key Plot Files Generated:")
+        print(f"   📈 Enhanced predictions: {symbol}_enhanced_predictions.png")
+        print(f"   📊 Residual analysis: {symbol}_residual_analysis.png")
+        print(f"   ⏳ Horizon errors: {symbol}_horizon_error_analysis.png")
+        print(f"   💰 Price predictions: {symbol}_price_predictions.png")
+        print(f"   📋 Performance metrics: {symbol}_performance_metrics.png")
+        print(f"   📈 Returns comparison: {symbol}_returns_comparison.png")
+        
+        print(f"\n✅ Analysis completed! All plots ready for baseline comparison.")
     
     def _save_analysis_report(self, metrics: Dict[str, float], feature_analysis: Dict[str, Any], prefix: str = "") -> None:
         """Save comprehensive analysis report to file."""
@@ -819,43 +915,198 @@ class TFTTrainer:
         
         return md
     
-    def calculate_metrics(self, predictions: np.ndarray, targets: np.ndarray) -> Dict[str, float]:
-        """Calculate comprehensive performance metrics."""
-        # Flatten if needed
-        pred_flat = predictions.flatten()
-        target_flat = targets.flatten()
+    def calculate_metrics(self, predictions: np.ndarray, targets: np.ndarray, 
+                         current_prices: np.ndarray = None) -> Dict[str, float]:
+        """
+        Calculate comprehensive prediction metrics matching baseline pipeline exactly.
         
-        # Remove any NaN values
-        mask = ~(np.isnan(pred_flat) | np.isnan(target_flat))
-        pred_clean = pred_flat[mask]
-        target_clean = target_flat[mask]
-        
-        if len(pred_clean) == 0:
-            return {"error": "No valid predictions"}
-        
-        # Calculate metrics
-        mse = np.mean((pred_clean - target_clean) ** 2)
-        rmse = np.sqrt(mse)
-        mae = np.mean(np.abs(pred_clean - target_clean))
-        
-        # R-squared
-        ss_res = np.sum((target_clean - pred_clean) ** 2)
-        ss_tot = np.sum((target_clean - np.mean(target_clean)) ** 2)
-        r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
-        
-        # Directional accuracy
-        pred_direction = np.sign(np.diff(pred_clean))
-        target_direction = np.sign(np.diff(target_clean))
-        directional_accuracy = np.mean(pred_direction == target_direction) if len(pred_direction) > 0 else 0
-        
-        return {
-            'mse': mse,
-            'rmse': rmse,
-            'mae': mae,
-            'r2': r2,
-            'directional_accuracy': directional_accuracy,
-            'data_points': len(pred_clean)
-        }
+        Args:
+            predictions: Predicted returns [n_samples, predict_len] 
+            targets: True returns [n_samples, predict_len]
+            current_prices: Starting prices for each sequence [n_samples]
+        """
+        try:
+            # Handle both 1D and 2D arrays
+            if predictions.ndim == 1:
+                predictions = predictions.reshape(-1, 1)
+            if targets.ndim == 1:
+                targets = targets.reshape(-1, 1)
+            
+            # Flatten for overall metrics
+            y_true_flat = targets.flatten()
+            y_pred_flat = predictions.flatten()
+            
+            # === REGRESSION METRICS ===
+            # MAE, RMSE, MAPE, R²
+            mae_returns = mean_absolute_error(y_true_flat, y_pred_flat)
+            rmse_returns = np.sqrt(mean_squared_error(y_true_flat, y_pred_flat))
+            r2_returns = r2_score(y_true_flat, y_pred_flat)
+            mape_returns = np.mean(np.abs((y_true_flat - y_pred_flat) / (np.abs(y_true_flat) + 1e-8))) * 100
+            
+            # === CLASSIFICATION METRICS (TREND PREDICTION) ===
+            # Convert returns to binary classification (up/down trend)
+            y_true_binary = (y_true_flat > 0).astype(int)
+            y_pred_binary = (y_pred_flat > 0).astype(int)
+            
+            # Calculate classification metrics
+            accuracy = accuracy_score(y_true_binary, y_pred_binary)
+            balanced_accuracy = balanced_accuracy_score(y_true_binary, y_pred_binary)
+            
+            # F1-Score (handle case where one class is missing)
+            try:
+                f1_score_val = f1_score(y_true_binary, y_pred_binary, average='binary')
+            except:
+                f1_score_val = 0.0
+            
+            # AUC-ROC (use predicted returns as probabilities after normalization)
+            try:
+                # Normalize predictions to [0,1] range for ROC calculation
+                y_pred_normalized = (y_pred_flat - y_pred_flat.min()) / (y_pred_flat.max() - y_pred_flat.min() + 1e-8)
+                auc_roc = roc_auc_score(y_true_binary, y_pred_normalized)
+            except:
+                auc_roc = 0.5  # Random performance
+            
+            # === FINANCIAL METRICS ===
+            predict_len = predictions.shape[1]
+            
+            # Use dummy prices if not provided
+            if current_prices is None:
+                current_prices = np.full(len(predictions), 100.0)
+            
+            # Calculate cumulative returns for the prediction period
+            cumulative_actual_returns = []
+            cumulative_predicted_returns = []
+            
+            for i in range(len(predictions)):
+                cum_actual = np.prod(1 + targets[i]) - 1
+                cum_pred = np.prod(1 + predictions[i]) - 1
+                cumulative_actual_returns.append(cum_actual)
+                cumulative_predicted_returns.append(cum_pred)
+            
+            # Average cumulative returns
+            avg_actual_return = np.mean(cumulative_actual_returns)
+            avg_predicted_return = np.mean(cumulative_predicted_returns)
+            
+            # Annualized Return (assuming predict_len is in days)
+            days_in_prediction = predict_len
+            annualized_actual_return = (1 + avg_actual_return) ** (252 / days_in_prediction) - 1
+            annualized_predicted_return = (1 + avg_predicted_return) ** (252 / days_in_prediction) - 1
+            
+            # Sharpe Ratio (using predicted returns volatility)
+            returns_volatility = np.std(y_pred_flat)
+            annualized_volatility = returns_volatility * np.sqrt(252)
+            
+            # Assume risk-free rate of 3% (0.03)
+            risk_free_rate = 0.03
+            sharpe_ratio = (annualized_predicted_return - risk_free_rate) / (annualized_volatility + 1e-8)
+            
+            # Maximum Drawdown calculation
+            def calculate_mdd(price_sequences):
+                if not price_sequences:
+                    return 0.0
+                
+                max_drawdowns = []
+                for prices in price_sequences:
+                    if len(prices) == 0:
+                        continue
+                    
+                    # Calculate running maximum
+                    running_max = np.maximum.accumulate(prices)
+                    # Calculate drawdown at each point
+                    drawdown = (prices - running_max) / running_max
+                    # Maximum drawdown is the most negative value
+                    max_drawdown = np.min(drawdown)
+                    max_drawdowns.append(max_drawdown)
+                
+                return np.mean(max_drawdowns) if max_drawdowns else 0.0
+            
+            # Build price sequences for MDD calculation
+            predicted_prices_sequences = []
+            actual_prices_sequences = []
+            
+            for i in range(len(predictions)):
+                start_price = current_prices[i]
+                
+                pred_prices = [start_price]
+                actual_prices = [start_price]
+                
+                for step in range(predict_len):
+                    pred_prices.append(pred_prices[-1] * (1 + predictions[i, step]))
+                    actual_prices.append(actual_prices[-1] * (1 + targets[i, step]))
+                
+                predicted_prices_sequences.append(pred_prices[1:])
+                actual_prices_sequences.append(actual_prices[1:])
+            
+            mdd_actual = calculate_mdd(actual_prices_sequences)
+            mdd_predicted = calculate_mdd(predicted_prices_sequences)
+            
+            # Price-based regression metrics
+            predicted_prices_flat = np.array(predicted_prices_sequences).flatten()
+            actual_prices_flat = np.array(actual_prices_sequences).flatten()
+            
+            mae_prices = mean_absolute_error(actual_prices_flat, predicted_prices_flat)
+            rmse_prices = np.sqrt(mean_squared_error(actual_prices_flat, predicted_prices_flat))
+            r2_prices = r2_score(actual_prices_flat, predicted_prices_flat)
+            mape_prices = np.mean(np.abs((actual_prices_flat - predicted_prices_flat) / (actual_prices_flat + 1e-8))) * 100
+            
+            # Compile all metrics to match baseline format exactly
+            metrics = {
+                # === REGRESSION METRICS ===
+                'mae_returns': float(mae_returns),
+                'rmse_returns': float(rmse_returns),
+                'r2_returns': float(r2_returns),
+                'mape_returns': float(mape_returns),
+                
+                # Price-based regression metrics
+                'mae_prices': float(mae_prices),
+                'rmse_prices': float(rmse_prices),
+                'r2_prices': float(r2_prices),
+                'mape_prices': float(mape_prices),
+                
+                # === CLASSIFICATION METRICS ===
+                'accuracy': float(accuracy),
+                'balanced_accuracy': float(balanced_accuracy),
+                'f1_score': float(f1_score_val),
+                'auc_roc': float(auc_roc),
+                
+                # === FINANCIAL METRICS ===
+                'annualized_return_actual': float(annualized_actual_return),
+                'annualized_return_predicted': float(annualized_predicted_return),
+                'sharpe_ratio': float(sharpe_ratio),
+                'mdd_actual': float(mdd_actual),
+                'mdd_predicted': float(mdd_predicted),
+                'cumulative_return_actual': float(avg_actual_return),
+                'cumulative_return_predicted': float(avg_predicted_return),
+                
+                # Additional useful metrics
+                'volatility_actual': float(np.std(y_true_flat)),
+                'volatility_predicted': float(np.std(y_pred_flat)),
+                'predict_len': int(predict_len),
+                'data_points': len(predictions),
+                
+                # Legacy metrics for compatibility
+                'mse': float(rmse_returns**2),
+                'rmse': float(rmse_returns),
+                'mae': float(mae_returns),
+                'r2': float(r2_returns),
+                'directional_accuracy': float(accuracy),
+            }
+            
+            return metrics
+            
+        except Exception as e:
+            print(f"⚠️ Error calculating metrics: {e}")
+            return {
+                'mae_returns': np.inf, 'rmse_returns': np.inf, 'r2_returns': -np.inf, 'mape_returns': np.inf,
+                'mae_prices': np.inf, 'rmse_prices': np.inf, 'r2_prices': -np.inf, 'mape_prices': np.inf,
+                'accuracy': 0.0, 'balanced_accuracy': 0.0, 'f1_score': 0.0, 'auc_roc': 0.5,
+                'annualized_return_actual': 0.0, 'annualized_return_predicted': 0.0,
+                'sharpe_ratio': 0.0, 'mdd_actual': 0.0, 'mdd_predicted': 0.0,
+                'cumulative_return_actual': 0.0, 'cumulative_return_predicted': 0.0,
+                'volatility_actual': 0.0, 'volatility_predicted': 0.0, 'predict_len': 1,
+                'data_points': 0, 'mse': np.inf, 'rmse': np.inf, 'mae': np.inf, 
+                'r2': -np.inf, 'directional_accuracy': 0.0,
+            }
     
     def plot_training_progress(self) -> None:
         """Plot training progress."""
@@ -1399,7 +1650,832 @@ Model: TFT"""
             'total_news_features': len(news_features)
         }
     
-    # ...existing code...
+    # ========== BASELINE-COMPATIBLE PLOTTING METHODS ==========
+    
+    def create_enhanced_prediction_plots(self, predictions: np.ndarray, targets: np.ndarray, 
+                                       timestamps: np.ndarray = None, symbol: str = "TFT") -> None:
+        """Create enhanced prediction plots with detailed analysis for validation test set."""
+        print(f"📊 Creating enhanced prediction plots for {symbol}...")
+        
+        try:
+            # Handle both 1D and 2D arrays
+            if predictions.ndim == 1:
+                predictions = predictions.reshape(-1, 1)
+            if targets.ndim == 1:
+                targets = targets.reshape(-1, 1)
+                
+            predict_len = predictions.shape[1]
+            horizons = np.arange(1, predict_len + 1)
+            
+            # Create comprehensive plots: 2x2 grid for each type of analysis
+            fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+            fig.suptitle(f'{symbol} - Enhanced Prediction Analysis (Validation Set)', fontsize=16, fontweight='bold')
+            
+            # 1. Predicted vs Actual Returns/Prices
+            ax1 = axes[0, 0]
+            ax1.set_title('Predicted vs Actual Final Returns')
+            ax1.set_xlabel('Actual Returns')
+            ax1.set_ylabel('Predicted Returns')
+            
+            # Calculate cumulative returns over prediction horizon
+            actual_cumulative = np.sum(targets, axis=1)
+            predicted_cumulative = np.sum(predictions, axis=1)
+            
+            # Scatter plot
+            ax1.scatter(actual_cumulative, predicted_cumulative, 
+                       alpha=0.6, label='TFT', color='blue', s=20)
+            
+            # Add perfect prediction line
+            min_val = min(actual_cumulative.min(), predicted_cumulative.min())
+            max_val = max(actual_cumulative.max(), predicted_cumulative.max())
+            ax1.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='Perfect Prediction')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # 2. Error Over Horizon (MAE and RMSE by forecast step)
+            ax2 = axes[0, 1]
+            ax2.set_title('Error Over Forecast Horizon')
+            ax2.set_xlabel('Forecast Horizon (Days)')
+            ax2.set_ylabel('Error')
+            
+            # Calculate MAE and RMSE for each horizon step
+            mae_by_horizon = []
+            rmse_by_horizon = []
+            
+            for h in range(predict_len):
+                mae_h = mean_absolute_error(targets[:, h], predictions[:, h])
+                rmse_h = np.sqrt(mean_squared_error(targets[:, h], predictions[:, h]))
+                mae_by_horizon.append(mae_h)
+                rmse_by_horizon.append(rmse_h)
+            
+            # Plot MAE and RMSE lines
+            ax2.plot(horizons, mae_by_horizon, '-o', color='blue', 
+                    label='TFT (MAE)', linewidth=2, alpha=0.8)
+            ax2.plot(horizons, rmse_by_horizon, '--s', color='red', 
+                    label='TFT (RMSE)', linewidth=2, alpha=0.8)
+            
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            ax2.set_xticks(horizons)
+            
+            # 3. Residual Plots (Errors vs Predicted Values)
+            ax3 = axes[1, 0]
+            ax3.set_title('Residuals vs Predicted Values')
+            ax3.set_xlabel('Predicted Returns')
+            ax3.set_ylabel('Residuals (Actual - Predicted)')
+            
+            # Flatten for residual analysis
+            pred_flat = predictions.flatten()
+            actual_flat = targets.flatten()
+            residuals = actual_flat - pred_flat
+            
+            # Scatter plot of residuals
+            ax3.scatter(pred_flat, residuals, alpha=0.5, label='TFT', 
+                       color='blue', s=15)
+            
+            # Add zero line
+            ax3.axhline(y=0, color='k', linestyle='-', alpha=0.5)
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            
+            # 4. Directional Accuracy Over Horizon
+            ax4 = axes[1, 1]
+            ax4.set_title('Directional Accuracy Over Forecast Horizon')
+            ax4.set_xlabel('Forecast Horizon (Days)')
+            ax4.set_ylabel('Directional Accuracy (%)')
+            
+            # Calculate directional accuracy for each horizon
+            directional_accuracy = []
+            
+            for h in range(predict_len):
+                actual_direction = (targets[:, h] > 0).astype(int)
+                predicted_direction = (predictions[:, h] > 0).astype(int)
+                accuracy = accuracy_score(actual_direction, predicted_direction) * 100
+                directional_accuracy.append(accuracy)
+            
+            # Plot directional accuracy
+            ax4.plot(horizons, directional_accuracy, '-o', color='blue', 
+                    label='TFT', linewidth=2, markersize=6, alpha=0.8)
+            
+            # Add 50% baseline (random guessing)
+            ax4.axhline(y=50, color='k', linestyle='--', alpha=0.5, label='Random Baseline (50%)')
+            ax4.legend()
+            ax4.grid(True, alpha=0.3)
+            ax4.set_xticks(horizons)
+            ax4.set_ylim(30, 80)  # Focus on reasonable range
+            
+            plt.tight_layout()
+            plot_path = self.plots_dir / f"{symbol}_enhanced_predictions.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📈 {symbol} enhanced prediction plots saved to {plot_path}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create enhanced prediction plots for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def create_detailed_residual_analysis(self, predictions: np.ndarray, targets: np.ndarray, 
+                                        timestamps: np.ndarray = None, symbol: str = "TFT") -> None:
+        """Create detailed residual analysis plots including time series residuals."""
+        print(f"📊 Creating detailed residual analysis for {symbol}...")
+        
+        try:
+            # Handle both 1D and 2D arrays
+            if predictions.ndim == 1:
+                predictions = predictions.reshape(-1, 1)
+            if targets.ndim == 1:
+                targets = targets.reshape(-1, 1)
+                
+            predict_len = predictions.shape[1]
+            
+            # Create residual analysis plots: 3x2 grid
+            fig, axes = plt.subplots(3, 2, figsize=(20, 18))
+            fig.suptitle(f'{symbol} - Detailed Residual Analysis', fontsize=16, fontweight='bold')
+            
+            # Calculate residuals for different horizons
+            residuals_by_horizon = []
+            for h in range(predict_len):
+                residuals_h = targets[:, h] - predictions[:, h]
+                residuals_by_horizon.append(residuals_h)
+            
+            # 1. Residuals over time (for first forecast horizon)
+            ax = axes[0, 0]
+            ax.set_title('Residuals Over Time (1-Day Horizon)')
+            ax.set_xlabel('Sample Index')
+            ax.set_ylabel('Residuals')
+            
+            ax.plot(residuals_by_horizon[0], color='blue', 
+                   label='TFT', alpha=0.7, linewidth=1)
+            ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            # 2. Residual distribution (histogram)
+            ax = axes[0, 1]
+            ax.set_title('Residual Distribution')
+            ax.set_xlabel('Residuals')
+            ax.set_ylabel('Frequency')
+            
+            all_residuals = np.concatenate(residuals_by_horizon)
+            ax.hist(all_residuals, bins=30, alpha=0.6, color='blue', 
+                   label='TFT', density=True)
+            ax.axvline(x=0, color='k', linestyle='-', alpha=0.3)
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            # 3. Q-Q plot for normality check
+            ax = axes[1, 0]
+            ax.set_title('TFT - Q-Q Plot (Normality Check)')
+            ax.set_xlabel('Theoretical Quantiles')
+            ax.set_ylabel('Sample Quantiles')
+            
+            if SCIPY_AVAILABLE:
+                stats.probplot(all_residuals, dist="norm", plot=ax)
+            else:
+                # Fallback: simple histogram instead of Q-Q plot
+                ax.hist(all_residuals, bins=20, alpha=0.7, density=True)
+                ax.set_title('TFT - Residual Distribution (SciPy not available)')
+                ax.set_ylabel('Density')
+            
+            ax.grid(True, alpha=0.3)
+            
+            # 4. Residuals vs Fitted Values
+            ax = axes[1, 1]
+            ax.set_title('Residuals vs Fitted Values')
+            ax.set_xlabel('Fitted Values')
+            ax.set_ylabel('Residuals')
+            
+            fitted_flat = predictions.flatten()
+            residuals_flat = all_residuals
+            
+            ax.scatter(fitted_flat, residuals_flat, alpha=0.5, color='blue', s=10)
+            ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+            ax.grid(True, alpha=0.3)
+            
+            # 5. Residuals autocorrelation
+            ax = axes[2, 0]
+            ax.set_title('Residuals Autocorrelation')
+            ax.set_xlabel('Lag')
+            ax.set_ylabel('Autocorrelation')
+            
+            # Simple autocorrelation calculation
+            max_lag = min(20, len(all_residuals) // 4)
+            autocorr = []
+            for lag in range(max_lag):
+                if lag == 0:
+                    autocorr.append(1.0)
+                else:
+                    corr = np.corrcoef(all_residuals[:-lag], all_residuals[lag:])[0, 1]
+                    autocorr.append(corr if not np.isnan(corr) else 0.0)
+            
+            ax.plot(range(max_lag), autocorr, 'o-', color='blue', alpha=0.7)
+            ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+            ax.grid(True, alpha=0.3)
+            
+            # 6. Residuals statistics summary
+            ax = axes[2, 1]
+            ax.set_title('Residuals Statistics')
+            ax.axis('off')
+            
+            stats_text = f"""Residuals Statistics:
+
+Mean: {np.mean(all_residuals):.6f}
+Std: {np.std(all_residuals):.6f}
+Skewness: {stats.skew(all_residuals):.3f if SCIPY_AVAILABLE else 'N/A'}
+Kurtosis: {stats.kurtosis(all_residuals):.3f if SCIPY_AVAILABLE else 'N/A'}
+
+Min: {np.min(all_residuals):.6f}
+Q1: {np.percentile(all_residuals, 25):.6f}
+Median: {np.median(all_residuals):.6f}
+Q3: {np.percentile(all_residuals, 75):.6f}
+Max: {np.max(all_residuals):.6f}
+
+Samples: {len(all_residuals)}
+Horizons: {predict_len}
+"""
+            
+            ax.text(0.1, 0.5, stats_text, transform=ax.transAxes, fontsize=12,
+                   verticalalignment='center', bbox=dict(boxstyle='round', facecolor='lightblue'))
+            
+            plt.tight_layout()
+            plot_path = self.plots_dir / f"{symbol}_residual_analysis.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📈 {symbol} residual analysis saved to {plot_path}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create residual analysis for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def create_horizon_error_analysis(self, predictions: np.ndarray, targets: np.ndarray, 
+                                    timestamps: np.ndarray = None, symbol: str = "TFT") -> None:
+        """Create comprehensive error analysis over forecast horizons."""
+        print(f"📊 Creating horizon error analysis for {symbol}...")
+        
+        try:
+            # Handle both 1D and 2D arrays
+            if predictions.ndim == 1:
+                predictions = predictions.reshape(-1, 1)
+            if targets.ndim == 1:
+                targets = targets.reshape(-1, 1)
+                
+            predict_len = predictions.shape[1]
+            horizons = np.arange(1, predict_len + 1)
+            
+            # Create comprehensive horizon analysis: 2x2 grid
+            fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+            fig.suptitle(f'{symbol} - Error Analysis Over Forecast Horizons', fontsize=16, fontweight='bold')
+            
+            # Calculate metrics for each horizon
+            mae_by_horizon = []
+            rmse_by_horizon = []
+            directional_accuracy = []
+            correlation_by_horizon = []
+            
+            for h in range(predict_len):
+                # Error metrics
+                mae_h = mean_absolute_error(targets[:, h], predictions[:, h])
+                rmse_h = np.sqrt(mean_squared_error(targets[:, h], predictions[:, h]))
+                
+                # Directional accuracy
+                actual_direction = (targets[:, h] > 0).astype(int)
+                predicted_direction = (predictions[:, h] > 0).astype(int)
+                dir_acc = accuracy_score(actual_direction, predicted_direction) * 100
+                
+                # Correlation
+                corr = np.corrcoef(targets[:, h], predictions[:, h])[0, 1]
+                if np.isnan(corr):
+                    corr = 0.0
+                
+                mae_by_horizon.append(mae_h)
+                rmse_by_horizon.append(rmse_h)
+                directional_accuracy.append(dir_acc)
+                correlation_by_horizon.append(corr)
+            
+            # 1. MAE Over Horizon
+            ax1 = axes[0, 0]
+            ax1.set_title('Mean Absolute Error (MAE) Over Forecast Horizon')
+            ax1.set_xlabel('Forecast Horizon (Days)')
+            ax1.set_ylabel('MAE')
+            
+            ax1.plot(horizons, mae_by_horizon, '-o', color='blue', 
+                    label='TFT', linewidth=2, markersize=6, alpha=0.8)
+            
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            ax1.set_xticks(horizons)
+            
+            # 2. RMSE Over Horizon
+            ax2 = axes[0, 1]
+            ax2.set_title('Root Mean Square Error (RMSE) Over Forecast Horizon')
+            ax2.set_xlabel('Forecast Horizon (Days)')
+            ax2.set_ylabel('RMSE')
+            
+            ax2.plot(horizons, rmse_by_horizon, '-s', color='red', 
+                    label='TFT', linewidth=2, markersize=6, alpha=0.8)
+            
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            ax2.set_xticks(horizons)
+            
+            # 3. Directional Accuracy Over Horizon
+            ax3 = axes[1, 0]
+            ax3.set_title('Directional Accuracy (% Up/Down Correct) Over Horizon')
+            ax3.set_xlabel('Forecast Horizon (Days)')
+            ax3.set_ylabel('Directional Accuracy (%)')
+            
+            ax3.plot(horizons, directional_accuracy, '-^', color='green', 
+                    label='TFT', linewidth=2, markersize=6, alpha=0.8)
+            
+            # Add 50% baseline (random guessing)
+            ax3.axhline(y=50, color='k', linestyle='--', alpha=0.5, label='Random Baseline (50%)')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            ax3.set_xticks(horizons)
+            ax3.set_ylim(30, 80)
+            
+            # 4. Correlation Over Horizon
+            ax4 = axes[1, 1]
+            ax4.set_title('Prediction Correlation Over Forecast Horizon')
+            ax4.set_xlabel('Forecast Horizon (Days)')
+            ax4.set_ylabel('Correlation Coefficient')
+            
+            ax4.plot(horizons, correlation_by_horizon, '-d', color='purple', 
+                    label='TFT', linewidth=2, markersize=6, alpha=0.8)
+            
+            ax4.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+            ax4.legend()
+            ax4.grid(True, alpha=0.3)
+            ax4.set_xticks(horizons)
+            ax4.set_ylim(-0.2, 1.0)
+            
+            plt.tight_layout()
+            plot_path = self.plots_dir / f"{symbol}_horizon_error_analysis.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📈 {symbol} horizon error analysis saved to {plot_path}")
+            
+            # Print summary statistics
+            print(f"\n📊 {symbol} - Horizon Error Analysis Summary:")
+            avg_mae = np.mean(mae_by_horizon)
+            avg_rmse = np.mean(rmse_by_horizon)
+            avg_dir_acc = np.mean(directional_accuracy)
+            avg_corr = np.mean(correlation_by_horizon)
+            
+            print(f"  TFT:")
+            print(f"    Avg MAE: {avg_mae:.4f}, Avg RMSE: {avg_rmse:.4f}")
+            print(f"    Avg Directional Accuracy: {avg_dir_acc:.1f}%")
+            print(f"    Avg Correlation: {avg_corr:.3f}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create horizon error analysis for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def create_price_prediction_plots(self, predictions: np.ndarray, targets: np.ndarray, 
+                                    current_prices: np.ndarray = None, timestamps: np.ndarray = None, 
+                                    symbol: str = "TFT") -> None:
+        """Create detailed price prediction plots showing actual vs predicted prices over time."""
+        print(f"📊 Creating price prediction plots for {symbol}...")
+        
+        try:
+            # Handle both 1D and 2D arrays
+            if predictions.ndim == 1:
+                predictions = predictions.reshape(-1, 1)
+            if targets.ndim == 1:
+                targets = targets.reshape(-1, 1)
+                
+            predict_len = predictions.shape[1]
+            
+            # Use dummy prices if not provided
+            if current_prices is None:
+                current_prices = np.full(len(predictions), 100.0)
+                
+            # Create comprehensive price analysis: 2x2 grid
+            fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+            fig.suptitle(f'{symbol} - Price Prediction Analysis (Validation Set)', fontsize=16, fontweight='bold')
+            
+            # 1. Price Trajectories for First N Samples
+            ax1 = axes[0, 0]
+            ax1.set_title('Price Trajectories - First 10 Validation Samples')
+            ax1.set_xlabel('Days into Forecast')
+            ax1.set_ylabel('Price ($)')
+            
+            n_samples_to_show = min(10, len(targets))
+            days = np.arange(predict_len + 1)  # Include starting point
+            
+            for sample_idx in range(n_samples_to_show):
+                start_price = current_prices[sample_idx]
+                actual_returns = targets[sample_idx]
+                predicted_returns = predictions[sample_idx]
+                
+                # Calculate actual price trajectory
+                actual_prices = [start_price]
+                current_price = start_price
+                for ret in actual_returns:
+                    current_price = current_price * (1 + ret)
+                    actual_prices.append(current_price)
+                
+                # Calculate predicted price trajectory
+                pred_prices = [start_price]
+                current_price = start_price
+                for ret in predicted_returns:
+                    current_price = current_price * (1 + ret)
+                    pred_prices.append(current_price)
+                
+                # Plot trajectories
+                if sample_idx == 0:  # Only add labels once
+                    ax1.plot(days, actual_prices, 'b-', alpha=0.7, linewidth=2, label='Actual')
+                    ax1.plot(days, pred_prices, 'r--', alpha=0.7, linewidth=2, label='TFT Pred')
+                else:
+                    ax1.plot(days, actual_prices, 'b-', alpha=0.3, linewidth=1)
+                    ax1.plot(days, pred_prices, 'r--', alpha=0.3, linewidth=1)
+            
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # 2. Final Price Scatter Plot (Actual vs Predicted)
+            ax2 = axes[0, 1]
+            ax2.set_title('Final Price Predictions (End of Forecast Period)')
+            ax2.set_xlabel('Actual Final Price ($)')
+            ax2.set_ylabel('Predicted Final Price ($)')
+            
+            # Calculate final prices
+            actual_final_prices = []
+            predicted_final_prices = []
+            
+            for j in range(len(predictions)):
+                start_price = current_prices[j]
+                
+                # Actual final price
+                actual_final = start_price * np.prod(1 + targets[j])
+                
+                # Predicted final price
+                predicted_final = start_price * np.prod(1 + predictions[j])
+                
+                actual_final_prices.append(actual_final)
+                predicted_final_prices.append(predicted_final)
+            
+            # Scatter plot
+            ax2.scatter(actual_final_prices, predicted_final_prices, 
+                       alpha=0.6, label='TFT', color='blue', s=30)
+            
+            # Add perfect prediction line
+            min_price = min(actual_final_prices)
+            max_price = max(actual_final_prices)
+            ax2.plot([min_price, max_price], [min_price, max_price], 'k--', alpha=0.5, label='Perfect Prediction')
+            
+            # Calculate and display correlation
+            corr = np.corrcoef(actual_final_prices, predicted_final_prices)[0, 1]
+            ax2.text(0.05, 0.95, f'Correlation: {corr:.3f}', 
+                   transform=ax2.transAxes, fontsize=10, 
+                   bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+            
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            
+            print(f"  TFT - Final Price Correlation: {corr:.3f}")
+            
+            # 3. Cumulative Returns Comparison
+            ax3 = axes[1, 0]
+            ax3.set_title('Cumulative Returns Over Validation Period')
+            ax3.set_xlabel('Sample Index')
+            ax3.set_ylabel('Cumulative Return (%)')
+            
+            # Calculate cumulative returns for each sample
+            actual_cumulative = np.cumsum(np.sum(targets, axis=1)) * 100
+            predicted_cumulative = np.cumsum(np.sum(predictions, axis=1)) * 100
+            
+            sample_indices = np.arange(len(actual_cumulative))
+            
+            ax3.plot(sample_indices, actual_cumulative, 'k-', 
+                    linewidth=3, label='Actual', alpha=0.8)
+            ax3.plot(sample_indices, predicted_cumulative, 'r--', 
+                    linewidth=2, label='TFT Pred', alpha=0.8)
+            
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            ax3.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+            
+            # 4. Price Prediction Error Distribution
+            ax4 = axes[1, 1]
+            ax4.set_title('Price Prediction Error Distribution')
+            ax4.set_xlabel('Price Prediction Error ($)')
+            ax4.set_ylabel('Density')
+            
+            # Calculate price errors
+            price_errors = []
+            for j in range(len(predictions)):
+                start_price = current_prices[j]
+                actual_final = start_price * np.prod(1 + targets[j])
+                predicted_final = start_price * np.prod(1 + predictions[j])
+                error = predicted_final - actual_final
+                price_errors.append(error)
+            
+            # Plot histogram
+            ax4.hist(price_errors, bins=30, alpha=0.6, color='blue', 
+                    label='TFT', density=True)
+            
+            ax4.axvline(x=0, color='k', linestyle='-', alpha=0.5)
+            ax4.legend()
+            ax4.grid(True, alpha=0.3)
+            
+            # Print error statistics
+            mae_price = np.mean(np.abs(price_errors))
+            rmse_price = np.sqrt(np.mean(np.array(price_errors)**2))
+            print(f"  TFT - Price MAE: ${mae_price:.2f}, Price RMSE: ${rmse_price:.2f}")
+            
+            plt.tight_layout()
+            plot_path = self.plots_dir / f"{symbol}_price_predictions.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📈 {symbol} price prediction plots saved to {plot_path}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create price prediction plots for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def create_symbol_plots(self, predictions: np.ndarray, targets: np.ndarray, metrics: Dict[str, float],
+                          current_prices: np.ndarray = None, timestamps: np.ndarray = None, 
+                          symbol: str = "TFT") -> None:
+        """Create plots showing Classification, Regression, Financial metrics, and Price Comparisons."""
+        print(f"📊 Creating performance metrics plots for {symbol}...")
+        
+        try:
+            # Handle both 1D and 2D arrays
+            if predictions.ndim == 1:
+                predictions = predictions.reshape(-1, 1)
+            if targets.ndim == 1:
+                targets = targets.reshape(-1, 1)
+                
+            predict_len = predictions.shape[1]
+            
+            # Use dummy prices if not provided
+            if current_prices is None:
+                current_prices = np.full(len(predictions), 100.0)
+            
+            # Create subplots: 1 row, 4 columns (Classification, Regression, Financial, Price Comparison)
+            fig, axes = plt.subplots(1, 4, figsize=(24, 6))
+            fig.suptitle(f'{symbol} - TFT Model Performance Metrics & Price Predictions', fontsize=16, fontweight='bold')
+            
+            # Plot 1: Classification Metrics (Trend Prediction)
+            classification_metrics = ['accuracy', 'balanced_accuracy', 'f1_score', 'auc_roc']
+            classification_values = [metrics.get(metric, 0) for metric in classification_metrics]
+            classification_labels = ['Accuracy', 'Balanced Accuracy', 'F1-Score', 'AUC-ROC']
+            
+            bars1 = axes[0].bar(classification_labels, classification_values, 
+                              color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'], alpha=0.8)
+            axes[0].set_title('TFT - Classification Metrics')
+            axes[0].set_ylabel('Score')
+            axes[0].set_ylim(0, 1)
+            axes[0].grid(True, alpha=0.3)
+            
+            # Add value labels on bars
+            for bar, value in zip(bars1, classification_values):
+                axes[0].text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.01,
+                           f'{value:.3f}', ha='center', va='bottom', fontsize=10)
+            
+            # Plot 2: Regression Metrics (Price Prediction)
+            regression_metrics = ['mae_returns', 'rmse_returns', 'mape_returns', 'r2_returns']
+            regression_values = [metrics.get(metric, 0) for metric in regression_metrics]
+            regression_labels = ['MAE', 'RMSE', 'MAPE (%)', 'R²']
+            
+            # Normalize MAPE to be on similar scale (divide by 100)
+            regression_values_normalized = regression_values.copy()
+            if len(regression_values_normalized) > 2:
+                regression_values_normalized[2] = regression_values_normalized[2] / 100  # MAPE normalization
+            
+            bars2 = axes[1].bar(regression_labels, regression_values_normalized, 
+                              color=['#9467bd', '#8c564b', '#e377c2', '#7f7f7f'], alpha=0.8)
+            axes[1].set_title('TFT - Regression Metrics')
+            axes[1].set_ylabel('Score')
+            axes[1].grid(True, alpha=0.3)
+            
+            # Add value labels on bars (show original values)
+            for bar, value, orig_value in zip(bars2, regression_values_normalized, regression_values):
+                axes[1].text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.001,
+                           f'{orig_value:.3f}', ha='center', va='bottom', fontsize=10)
+            
+            # Plot 3: Financial Metrics
+            financial_metrics = ['annualized_return_predicted', 'sharpe_ratio', 'mdd_predicted', 'cumulative_return_predicted']
+            financial_values = [metrics.get(metric, 0) for metric in financial_metrics]
+            financial_labels = ['Annualized Return', 'Sharpe Ratio', 'Max Drawdown', 'Cumulative Return']
+            
+            # Color bars based on performance (green for positive, red for negative)
+            colors = []
+            for val in financial_values:
+                if val > 0:
+                    colors.append('#2ca02c')  # Green
+                else:
+                    colors.append('#d62728')  # Red
+            
+            bars3 = axes[2].bar(financial_labels, financial_values, 
+                              color=colors, alpha=0.8)
+            axes[2].set_title('TFT - Financial Metrics')
+            axes[2].set_ylabel('Value')
+            axes[2].grid(True, alpha=0.3)
+            axes[2].axhline(y=0, color='black', linestyle='-', alpha=0.3)
+            
+            # Add value labels on bars
+            for bar, value in zip(bars3, financial_values):
+                y_pos = bar.get_height() + 0.001 if value >= 0 else bar.get_height() - 0.01
+                axes[2].text(bar.get_x() + bar.get_width()/2., y_pos,
+                           f'{value:.3f}', ha='center', va='bottom' if value >= 0 else 'top', fontsize=10)
+            
+            # Plot 4: Actual vs Predicted Price Comparison
+            axes[3].set_title('TFT - Price Predictions vs Actual')
+            axes[3].set_ylabel('Price ($)')
+            axes[3].set_xlabel('Time (Sample Index)')
+            
+            # Reconstruct price sequences for visualization
+            n_samples_to_show = min(50, len(predictions))  # Show first 50 samples for clarity
+            sample_indices = np.arange(n_samples_to_show)
+            
+            # Calculate actual and predicted prices for each sample
+            actual_final_prices = []
+            predicted_final_prices = []
+            
+            for j in range(n_samples_to_show):
+                start_price = current_prices[j]
+                
+                # Calculate final price after predict_len days
+                actual_final_price = start_price * np.prod(1 + targets[j])
+                predicted_final_price = start_price * np.prod(1 + predictions[j])
+                
+                actual_final_prices.append(actual_final_price)
+                predicted_final_prices.append(predicted_final_price)
+            
+            # Plot actual vs predicted final prices
+            axes[3].plot(sample_indices, actual_final_prices, 'b-', linewidth=2, 
+                       label='Actual Prices', alpha=0.8)
+            axes[3].plot(sample_indices, predicted_final_prices, 'r--', linewidth=2, 
+                       label='TFT Predicted Prices', alpha=0.8)
+            
+            # Add correlation coefficient
+            corr_coef = np.corrcoef(actual_final_prices, predicted_final_prices)[0, 1]
+            axes[3].text(0.05, 0.95, f'Correlation: {corr_coef:.3f}', 
+                       transform=axes[3].transAxes, fontsize=10, 
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+            
+            axes[3].legend()
+            axes[3].grid(True, alpha=0.3)
+            
+            # Rotate x-axis labels for better readability
+            for col in range(4):
+                axes[col].tick_params(axis='x', rotation=45)
+            
+            # Print summary for this model
+            print(f"  📊 TFT Summary:")
+            print(f"     Classification - Accuracy: {metrics.get('accuracy', 0):.3f}, F1: {metrics.get('f1_score', 0):.3f}")
+            print(f"     Regression - MAE: {metrics.get('mae_returns', 0):.3f}, R²: {metrics.get('r2_returns', 0):.3f}")
+            print(f"     Financial - Sharpe: {metrics.get('sharpe_ratio', 0):.3f}, Return: {metrics.get('annualized_return_predicted', 0):.3f}")
+            print(f"     Price Correlation: {corr_coef:.3f}")
+            
+            plt.tight_layout()
+            plot_path = self.plots_dir / f"{symbol}_performance_metrics.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📈 {symbol} performance metrics plot saved to {plot_path}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create performance metrics plots for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def create_returns_comparison_plots(self, predictions: np.ndarray, targets: np.ndarray, 
+                                      timestamps: np.ndarray = None, symbol: str = "TFT") -> None:
+        """Create detailed returns comparison plots for a specific symbol."""
+        print(f"📊 Creating returns comparison plots for {symbol}...")
+        
+        try:
+            # Handle both 1D and 2D arrays
+            if predictions.ndim == 1:
+                predictions = predictions.reshape(-1, 1)
+            if targets.ndim == 1:
+                targets = targets.reshape(-1, 1)
+                
+            predict_len = predictions.shape[1]
+            
+            # Create returns analysis: 2x2 grid
+            fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+            fig.suptitle(f'{symbol} - Returns Comparison Analysis', fontsize=16, fontweight='bold')
+            
+            # 1. Returns Scatter Plot
+            ax1 = axes[0, 0]
+            ax1.set_title('Predicted vs Actual Returns (All Horizons)')
+            ax1.set_xlabel('Actual Returns')
+            ax1.set_ylabel('Predicted Returns')
+            
+            # Flatten all returns for scatter plot
+            actual_flat = targets.flatten()
+            predicted_flat = predictions.flatten()
+            
+            ax1.scatter(actual_flat, predicted_flat, alpha=0.5, s=10, color='blue', label='TFT')
+            
+            # Add perfect prediction line
+            min_val = min(actual_flat.min(), predicted_flat.min())
+            max_val = max(actual_flat.max(), predicted_flat.max())
+            ax1.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='Perfect Prediction')
+            
+            # Calculate correlation
+            corr = np.corrcoef(actual_flat, predicted_flat)[0, 1]
+            ax1.text(0.05, 0.95, f'Correlation: {corr:.3f}', 
+                   transform=ax1.transAxes, fontsize=10, 
+                   bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+            
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # 2. Returns Distribution Comparison
+            ax2 = axes[0, 1]
+            ax2.set_title('Returns Distribution Comparison')
+            ax2.set_xlabel('Returns')
+            ax2.set_ylabel('Density')
+            
+            ax2.hist(actual_flat, bins=50, alpha=0.6, density=True, label='Actual', color='blue')
+            ax2.hist(predicted_flat, bins=50, alpha=0.6, density=True, label='TFT Predicted', color='red')
+            
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            
+            # 3. Cumulative Returns Over Time
+            ax3 = axes[1, 0]
+            ax3.set_title('Cumulative Returns Over Validation Period')
+            ax3.set_xlabel('Sample Index')
+            ax3.set_ylabel('Cumulative Return')
+            
+            # Calculate period-wise cumulative returns
+            actual_period_returns = np.sum(targets, axis=1)
+            predicted_period_returns = np.sum(predictions, axis=1)
+            
+            actual_cumulative = np.cumsum(actual_period_returns)
+            predicted_cumulative = np.cumsum(predicted_period_returns)
+            
+            sample_indices = np.arange(len(actual_cumulative))
+            
+            ax3.plot(sample_indices, actual_cumulative, 'b-', linewidth=2, label='Actual', alpha=0.8)
+            ax3.plot(sample_indices, predicted_cumulative, 'r--', linewidth=2, label='TFT Predicted', alpha=0.8)
+            
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            ax3.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+            
+            # 4. Rolling Sharpe Ratio Comparison
+            ax4 = axes[1, 1]
+            ax4.set_title('Rolling Sharpe Ratio (20-period window)')
+            ax4.set_xlabel('Sample Index')
+            ax4.set_ylabel('Sharpe Ratio')
+            
+            # Calculate rolling Sharpe ratio
+            window = min(20, len(actual_period_returns) // 4)
+            if window > 1:
+                rolling_sharpe_actual = []
+                rolling_sharpe_predicted = []
+                
+                for i in range(window, len(actual_period_returns)):
+                    actual_window = actual_period_returns[i-window:i]
+                    predicted_window = predicted_period_returns[i-window:i]
+                    
+                    # Simple Sharpe calculation (mean/std)
+                    sharpe_actual = np.mean(actual_window) / (np.std(actual_window) + 1e-8)
+                    sharpe_predicted = np.mean(predicted_window) / (np.std(predicted_window) + 1e-8)
+                    
+                    rolling_sharpe_actual.append(sharpe_actual)
+                    rolling_sharpe_predicted.append(sharpe_predicted)
+                
+                rolling_indices = np.arange(window, len(actual_period_returns))
+                
+                ax4.plot(rolling_indices, rolling_sharpe_actual, 'b-', linewidth=2, label='Actual', alpha=0.8)
+                ax4.plot(rolling_indices, rolling_sharpe_predicted, 'r--', linewidth=2, label='TFT Predicted', alpha=0.8)
+                
+                ax4.legend()
+                ax4.grid(True, alpha=0.3)
+                ax4.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+            else:
+                ax4.text(0.5, 0.5, 'Insufficient data for rolling analysis', 
+                       transform=ax4.transAxes, ha='center', va='center', fontsize=12)
+            
+            plt.tight_layout()
+            plot_path = self.plots_dir / f"{symbol}_returns_comparison.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📈 {symbol} returns comparison plots saved to {plot_path}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create returns comparison plots for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # ========== END BASELINE-COMPATIBLE PLOTTING METHODS ==========
 
 def cleanup_old_files():
     """Clean up old test files."""
