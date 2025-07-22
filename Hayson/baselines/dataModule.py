@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from typing import Dict, Union, Optional, Callable, List, Tuple, Any
+from typing import Dict, Union, Optional, Callable, List, Tuple, Any, override
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -649,7 +649,6 @@ class Data_Day_Hourly_StocksPrice(dict, Valid_Data_Class):
                 raise ValueError(f"Unknown error type: {error_type}")
         # we will also calculate the profit estimate based on the predictions
         profit_estimate = sum(pred[k] - actual_values[k] for k in pred.keys() if k in actual_values)
-        print("WARNING: PROFIT IS NOT CORRECT")
         errors['profit_estimate'] = profit_estimate
         return errors
 

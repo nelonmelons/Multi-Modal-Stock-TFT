@@ -1,3 +1,12 @@
+# ==============================================================================
+# Environment variables
+# ==============================================================================
+# Do not commit sensitive information like API keys.
+# Use .env.example as a template.
+.env*
+!.env.example
+!.env.template
+
 
 # ==============================================================================
 # Stock-TFT Project .gitignore
@@ -527,6 +536,7 @@ experiments/
 !documentation/
 
 runs/
+deeplearning_baseline_runs/
 
 # ==============================================================================
 # END OF GITIGNORE
