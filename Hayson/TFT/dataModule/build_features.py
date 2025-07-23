@@ -677,8 +677,10 @@ def add_target_variable(df: pd.DataFrame) -> pd.DataFrame:
         symbol_df = df[df['symbol'] == symbol].copy()
         symbol_df = symbol_df.sort_values('date')
         
-        # Next-day return (percentage change)
-        symbol_df['target'] = symbol_df['close'].pct_change().shift(-1)
+        # CORRECT: Next-day return calculation
+        # Target at time t should be: (close[t+1] - close[t]) / close[t]
+        # This predicts the future return from t to t+1
+        symbol_df['target'] = (symbol_df['close'].shift(-1) - symbol_df['close']) / symbol_df['close']
         
         # Alternative targets
         symbol_df['target_price'] = symbol_df['close'].shift(-1)
@@ -710,7 +712,8 @@ def add_target_variable_temporal_safe(df: pd.DataFrame, split_date: str = None,
         
         # TEMPORAL-SAFE target calculation
         # Target at time t should predict value at t+1 (next day)
-        symbol_df['target'] = symbol_df['close'].pct_change().shift(-1)
+        # CORRECTED: Calculate future return properly
+        symbol_df['target'] = (symbol_df['close'].shift(-1) - symbol_df['close']) / symbol_df['close']
         symbol_df['target_price'] = symbol_df['close'].shift(-1)
         symbol_df['target_direction'] = (symbol_df['target'] > 0).astype(int)
         

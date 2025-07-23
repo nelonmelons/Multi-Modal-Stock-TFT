@@ -282,8 +282,7 @@ class MultimodalStockPredictor:
             if len(symbol_df) < self.sequence_length + predict_len:
                 print(f"   ⚠️ Insufficient data for {symbol}: {len(symbol_df)} rows (need {self.sequence_length + predict_len})")
                 continue
-            
-            # Prepare features and targets
+            # First, prepare basic data structures
             features = symbol_df[feature_cols].values
             targets = symbol_df['target'].values
             timestamps = symbol_df['date'].values
@@ -291,6 +290,89 @@ class MultimodalStockPredictor:
             # Handle missing values
             features = np.nan_to_num(features, nan=0.0, posinf=1e10, neginf=-1e10)
             targets = np.nan_to_num(targets, nan=0.0, posinf=1e10, neginf=-1e10)
+            
+            # 🔍 DEBUG: Check target calculation and data integrity
+            print(f"\n🔍 DEBUGGING {symbol}:")
+            print(f"   Target column statistics:")
+            print(f"     Mean: {symbol_df['target'].mean():.6f}")
+            print(f"     Std: {symbol_df['target'].std():.6f}")
+            print(f"     Min: {symbol_df['target'].min():.6f}")
+            print(f"     Max: {symbol_df['target'].max():.6f}")
+            
+            # 🔍 DEBUG: Additional analysis for systematic bias investigation
+            print(f"\n🔍 DEEPER DEBUGGING for {symbol}:")
+            
+            # Check target distribution properties
+            all_targets_flat = targets.flatten()
+            print(f"   Target distribution analysis:")
+            print(f"     Total targets: {len(all_targets_flat)}")
+            print(f"     Mean: {np.mean(all_targets_flat):.6f}")
+            print(f"     Std: {np.std(all_targets_flat):.6f}")
+            print(f"     Skewness: {np.mean(((all_targets_flat - np.mean(all_targets_flat)) / np.std(all_targets_flat))**3):.6f}")
+            print(f"     Min: {np.min(all_targets_flat):.6f}, Max: {np.max(all_targets_flat):.6f}")
+            
+            # Check for systematic patterns in features vs targets
+            feature_means = np.mean(features, axis=1)  # Mean feature value per time step
+            print(f"   Feature-target correlation check:")
+            if len(feature_means) == len(targets):
+                corr_feat_targ = np.corrcoef(feature_means, targets)[0,1]
+                print(f"     Correlation between feature means and targets: {corr_feat_targ:.6f}")
+                if abs(corr_feat_targ) > 0.3:
+                    print(f"     ⚠️  HIGH FEATURE-TARGET CORRELATION DETECTED!")
+            else:
+                print(f"     Feature-target shapes don't match: {len(feature_means)} vs {len(targets)}")
+            
+            # Check target autocorrelation
+            if len(targets) > 1:
+                target_autocorr = np.corrcoef(targets[:-1], targets[1:])[0,1] if len(targets) > 1 else 0
+                print(f"     Target autocorrelation (lag-1): {target_autocorr:.6f}")
+            
+            # Check if target is properly centered around zero
+            print(f"   Target centering check:")
+            print(f"     Should be close to 0 for random walk: {np.mean(targets):.6f}")
+            
+            # Check target statistics at different time positions
+            print(f"   Target statistics by position in sequence:")
+            targets_reshaped = targets.reshape(-1, 1) if len(targets.shape) == 1 else targets
+            for pos in range(min(3, len(targets))):
+                pos_mean = np.mean(targets_reshaped[pos::predict_len] if predict_len > 1 else [targets[pos]])
+                print(f"     Position {pos}: mean = {pos_mean:.6f}")
+
+            # Check if target is returns or something else
+            if 'close' in symbol_df.columns:
+                closes = symbol_df['close'].values
+                manual_returns = np.diff(closes) / closes[:-1]  # (close[t] - close[t-1]) / close[t-1]
+                stored_targets = symbol_df['target'].values[1:]  # Align with manual returns
+                
+                print(f"   Manual returns mean: {manual_returns.mean():.6f}")
+                print(f"   Stored targets mean: {stored_targets.mean():.6f}")
+                print(f"   Correlation: {np.corrcoef(manual_returns[:min(len(manual_returns), len(stored_targets))], stored_targets[:min(len(manual_returns), len(stored_targets))])[0,1]:.6f}")
+                
+                # Check for sign inversion
+                if len(manual_returns) > 0 and len(stored_targets) > 0:
+                    min_len = min(len(manual_returns), len(stored_targets))
+                    neg_corr = np.corrcoef(manual_returns[:min_len], -stored_targets[:min_len])[0,1]
+                    if neg_corr > 0.8:
+                        print(f"   ❌ POTENTIAL SIGN INVERSION DETECTED! Negative correlation: {neg_corr:.6f}")
+                    else:
+                        print(f"   ✅ No sign inversion detected")
+                        
+                # Check target calculation consistency across the dataframe
+                print(f"   Target calculation consistency check:")
+                manual_targets = (closes[1:] - closes[:-1]) / closes[:-1]
+                stored_check = symbol_df['target'].values[:-1]  # Exclude last NaN
+                min_len = min(len(manual_targets), len(stored_check))
+                if min_len > 0:
+                    consistency = np.corrcoef(manual_targets[:min_len], stored_check[:min_len])[0,1]
+                    print(f"     Consistency correlation: {consistency:.6f}")
+                    if consistency < 0.99:
+                        print(f"   ⚠️  TARGET CALCULATION INCONSISTENCY DETECTED!")
+                        for i in range(min(3, min_len)):
+                            print(f"     Row {i}: manual={manual_targets[i]:.6f}, stored={stored_check[i]:.6f}, diff={abs(manual_targets[i]-stored_check[i]):.6f}")
+            
+            # 🔍 DEBUG: Check sequence alignment
+            print(f"   Creating sequences...")
+            sequence_count = 0
             
             # Create sequences with multi-step targets (sliding window approach)
             # CRITICAL: This ensures no future peeking - features[i-sequence_length:i] uses ONLY past data
@@ -304,8 +386,18 @@ class MultimodalStockPredictor:
                 # Uses data from [i, i+predict_len) - strictly future data
                 multi_targets = targets[i:i+predict_len]
                 
+                # 🔍 DEBUG: Check first few sequences for temporal alignment
+                if sequence_count < 3:
+                    print(f"   Sequence {sequence_count}:")
+                    print(f"     Feature period: rows {i-self.sequence_length} to {i-1}")
+                    print(f"     Target period: rows {i} to {i+predict_len-1}")
+                    print(f"     Feature dates: {symbol_df.iloc[i-self.sequence_length]['date']} to {symbol_df.iloc[i-1]['date'] if i > 0 else 'N/A'}")
+                    print(f"     Target dates: {symbol_df.iloc[i]['date']} to {symbol_df.iloc[i+predict_len-1]['date']}")
+                    print(f"     Target values: {multi_targets}")
+                    print(f"     Last feature close: {symbol_df.iloc[i-1]['close'] if 'close' in symbol_df.columns else 'N/A'}")
+                    print(f"     First target close: {symbol_df.iloc[i]['close'] if 'close' in symbol_df.columns else 'N/A'}")
+                
                 # Metadata (timestamp of the first prediction) 
-                # Use the actual row index for better date tracking
                 timestamp = symbol_df.iloc[i]['date'] if 'date' in symbol_df.columns else i
                 
                 # Validation: Ensure we're not using future data in features
@@ -316,6 +408,7 @@ class MultimodalStockPredictor:
                 all_y.append(multi_targets)
                 all_timestamps.append(timestamp)
                 all_symbols.append(symbol)
+                sequence_count += 1
         
         if len(all_X) == 0:
             raise ValueError("No valid sequences could be created from the data")
@@ -828,14 +921,15 @@ class FixedBaselineRunner:
             predictor = MultimodalStockPredictor(sequence_length=self.config.get('encoder_len', 30))
             predict_len = self.config.get('predict_len', 5)
             
-            # Extract training data
+            # Extract training data - use appropriate feature_mode based on multimodal flag
+            feature_mode = 'full' if use_multimodal else 'ohlcv_only'
             X_train, y_train, timestamps_train, symbols_train = predictor.extract_features_from_datamodule(
-                train_datamodule, use_multimodal=use_multimodal, predict_len=predict_len
+                train_datamodule, feature_mode=feature_mode, predict_len=predict_len
             )
             
             # Extract validation data
             X_val, y_val, timestamps_val, symbols_val = predictor.extract_features_from_datamodule(
-                val_datamodule, use_multimodal=use_multimodal, predict_len=predict_len
+                val_datamodule, feature_mode=feature_mode, predict_len=predict_len
             )
             
             # Filter for current symbol
