@@ -23,7 +23,7 @@ import sys
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
 import math
@@ -61,12 +61,22 @@ class BaseModel(nn.Module):
         super().__init__()
         self.config = config
         self.predict_len = config['predict_len']
+        self.horizon_days = config.get('horizon_days', config['predict_len'])
 
     def forward(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         raise NotImplementedError
+    
+    def autoregressive_predict(self, batch: Dict[str, torch.Tensor], steps: Optional[int] = None) -> torch.Tensor:
+        """
+        Autoregressive prediction for horizon-based forecasting.
+        Default implementation falls back to standard forward pass.
+        """
+        if steps is None:
+            steps = self.predict_len
+        return self.forward(batch)
 
 class LSTMModel(BaseModel):
-    """Simple LSTM forecasting model."""
+    """LSTM forecasting model with autoregressive capability."""
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self.hidden_size = config['hidden_size']
@@ -79,17 +89,54 @@ class LSTMModel(BaseModel):
             batch_first=True,
             dropout=config['dropout']
         )
-        self.fc = nn.Linear(self.hidden_size, self.predict_len)
+        # Output single step predictions for autoregressive forecasting
+        self.fc = nn.Linear(self.hidden_size, 1)
+        # Alternative: direct multi-step prediction
+        self.fc_multi = nn.Linear(self.hidden_size, self.predict_len)
 
     def forward(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Direct multi-step prediction."""
         x_past = batch['x_past_features']
         _, (h_n, _) = self.lstm(x_past)
-        # Use the hidden state from the last layer
-        out = self.fc(h_n[-1])
+        # Use the hidden state from the last layer for multi-step prediction
+        out = self.fc_multi(h_n[-1])
         return out
+    
+    def autoregressive_predict(self, batch: Dict[str, torch.Tensor], steps: Optional[int] = None) -> torch.Tensor:
+        """Autoregressive prediction step by step."""
+        if steps is None:
+            steps = self.predict_len
+            
+        x_past = batch['x_past_features']
+        batch_size = x_past.size(0)
+        
+        # Initialize predictions tensor
+        predictions = torch.zeros(batch_size, steps, device=x_past.device)
+        
+        # Get initial hidden state
+        lstm_out, (h_n, c_n) = self.lstm(x_past)
+        
+        # Predict step by step
+        for step in range(steps):
+            # Predict next value using current hidden state
+            pred = self.fc(h_n[-1]).squeeze(-1)  # (batch_size,)
+            predictions[:, step] = pred
+            
+            # Update hidden state with prediction (simplified - could be improved)
+            # In practice, you might want to use the prediction as input for next step
+            pred_input = pred.unsqueeze(1).unsqueeze(2)  # (batch_size, 1, 1)
+            # Pad to match input feature dimension if needed
+            if pred_input.size(-1) < x_past.size(-1):
+                padding = torch.zeros(batch_size, 1, x_past.size(-1) - 1, device=x_past.device)
+                pred_input = torch.cat([pred_input, padding], dim=-1)
+            
+            # Pass through LSTM to update hidden state
+            _, (h_n, c_n) = self.lstm(pred_input, (h_n, c_n))
+        
+        return predictions
 
 class GRUModel(BaseModel):
-    """Simple GRU forecasting model."""
+    """GRU forecasting model with horizon-based capabilities."""
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self.hidden_size = config['hidden_size']
@@ -102,7 +149,10 @@ class GRUModel(BaseModel):
             batch_first=True,
             dropout=config['dropout']
         )
+        # Multi-step prediction head
         self.fc = nn.Linear(self.hidden_size, self.predict_len)
+        # Single-step prediction for autoregressive mode
+        self.fc_single = nn.Linear(self.hidden_size, 1)
 
     def forward(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         x_past = batch['x_past_features']
@@ -111,7 +161,7 @@ class GRUModel(BaseModel):
         return out
 
 class SoftAlignGRUModel(BaseModel):
-    """GRU model with a soft attention mechanism."""
+    """GRU model with soft attention mechanism and horizon-based prediction."""
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self.hidden_size = config['hidden_size']
@@ -129,22 +179,24 @@ class SoftAlignGRUModel(BaseModel):
         self.attn = nn.Linear(self.hidden_size, self.hidden_size)
         self.v = nn.Parameter(torch.rand(self.hidden_size))
         
+        # Multi-horizon prediction head
         self.fc = nn.Linear(self.hidden_size, self.predict_len)
 
     def forward(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         x_past = batch['x_past_features']
         outputs, h_n = self.gru(x_past)
         
-        # Attention
+        # Attention mechanism
         energy = torch.tanh(self.attn(outputs))
         attn_weights = torch.softmax(torch.einsum('bij,j->bi', energy, self.v), dim=1)
         context = torch.einsum('bi,bij->bj', attn_weights, outputs)
         
+        # Predict all horizon steps at once
         out = self.fc(context)
         return out
 
 class EncDecTransformerModel(BaseModel):
-    """Encoder-Decoder Transformer model."""
+    """Encoder-Decoder Transformer model with horizon-based prediction."""
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self.transformer = nn.Transformer(
@@ -157,7 +209,8 @@ class EncDecTransformerModel(BaseModel):
             batch_first=True
         )
         self.input_proj = nn.Linear(config['input_feature_dim'], config['hidden_size'])
-        self.output_proj = nn.Linear(config['hidden_size'], 1) # Predict one step at a time
+        # Predict full horizon at once
+        self.output_proj = nn.Linear(config['hidden_size'], 1)
         self.pos_encoder = nn.Parameter(torch.randn(1, config['encoder_len'], config['hidden_size']))
         self.pos_decoder = nn.Parameter(torch.randn(1, config['predict_len'], config['hidden_size']))
         # Robustness enhancements
@@ -167,11 +220,12 @@ class EncDecTransformerModel(BaseModel):
     def forward(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         src = self.input_proj(batch['x_past_features']) + self.pos_encoder
         
-        # Decoder input starts with a start token (zeros)
+        # Decoder input for horizon prediction
         tgt = torch.zeros(src.size(0), self.predict_len, src.size(2), device=src.device)
         tgt = tgt + self.pos_decoder
 
         output = self.transformer(src, tgt)
+        # Output shape: (batch_size, predict_len, 1) -> (batch_size, predict_len)
         return self.output_proj(output).squeeze(-1)
 
 class EncoderOnlyTransformerModel(BaseModel):
@@ -232,7 +286,21 @@ def train_model(model: nn.Module, loader: DataLoader, criterion: nn.Module, opti
             batch = {'x_past_features': x_past_features}
             
             predictions = model(batch)
-            targets = y[0].to(device)
+            # FIXED: Use the correct target format for horizon-based prediction
+            # y is a list where y[0] contains the actual targets
+            if isinstance(y, (list, tuple)):
+                targets = y[0].to(device)
+            else:
+                targets = y.to(device)
+            
+            # Ensure targets match prediction dimensions
+            if targets.dim() == 1:
+                targets = targets.unsqueeze(-1)
+            if targets.shape[-1] == 1 and predictions.shape[-1] > 1:
+                # If targets are single values but we predict multiple horizons,
+                # we need to repeat the target or use sequence targets
+                print(f"Warning: Target shape {targets.shape} doesn't match prediction shape {predictions.shape}")
+                targets = targets.repeat(1, predictions.shape[-1])
             
             loss = criterion(predictions, targets)
             loss.backward()
@@ -245,13 +313,15 @@ def train_model(model: nn.Module, loader: DataLoader, criterion: nn.Module, opti
     # Return the final epoch's average loss
     return avg_loss
 
-def validate_model(model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device) -> Tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
-    """Validation loop to get predictions and targets."""
+def validate_model(model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device, horizon_days: int = 1, debug_mode: bool = True) -> Tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+    """Validation loop to get predictions and targets with enhanced debugging."""
     model.eval()
     all_preds, all_targets, all_last_known = [], [], []
     
+    print(f"\n--- Starting Validation (Horizon: {horizon_days} days) ---")
+    
     with torch.no_grad():
-        for x, y in tqdm(loader, desc="Validating"):
+        for batch_idx, (x, y) in enumerate(tqdm(loader, desc="Validating")):
             # Create the single feature tensor
             x_past_features = torch.cat([x['encoder_cont'], x['encoder_cat'].float()], dim=-1).to(device)
             
@@ -259,9 +329,58 @@ def validate_model(model: nn.Module, loader: DataLoader, criterion: nn.Module, d
             batch = {'x_past_features': x_past_features}
             
             predictions = model(batch)
-            targets = y[0]
+            
+            # FIXED: Handle target format correctly for horizon-based prediction
+            if isinstance(y, (list, tuple)):
+                targets = y[0]
+            else:
+                targets = y
+            
             # The last known price is the last value in the encoder_target sequence
             last_known_price = x['encoder_target'][:, -1]
+            
+            # Debug first batch
+            if batch_idx == 0 and debug_mode:
+                print(f"🔍 Batch {batch_idx} Debug Info:")
+                print(f"   Input features shape: {x_past_features.shape}")
+                print(f"   Encoder target shape: {x['encoder_target'].shape}")
+                print(f"   Prediction shape: {predictions.shape}")
+                print(f"   Target shape: {targets.shape}")
+                print(f"   Last known price shape: {last_known_price.shape}")
+                
+                # Sample values for leakage detection
+                last_price_sample = last_known_price[0].cpu().item()
+                pred_sample = predictions[0, 0].cpu().item() if predictions.dim() > 1 else predictions[0].cpu().item()
+                target_sample = targets[0, 0].cpu().item() if targets.dim() > 1 else targets[0].cpu().item()
+                
+                print(f"   Last encoder price (sample 0): {last_price_sample:.4f}")
+                print(f"   First prediction (sample 0): {pred_sample:.4f}")
+                print(f"   First target (sample 0): {target_sample:.4f}")
+                
+                # Check if prediction is suspiciously close to last encoder price
+                if abs(last_price_sample) > 1e-6:  # Avoid division by zero
+                    print(f"   Target change vs last encoder: {((target_sample/last_price_sample - 1) * 100):.2f}%")
+                    print(f"   Prediction change vs last encoder: {((pred_sample/last_price_sample - 1) * 100):.2f}%")
+                    
+                    # Check for potential data leakage
+                    pred_vs_encoder_diff = abs(pred_sample - last_price_sample) / abs(last_price_sample)
+                    target_vs_encoder_diff = abs(target_sample - last_price_sample) / abs(last_price_sample)
+                    
+                    if pred_vs_encoder_diff < 0.001:  # Less than 0.1% difference
+                        print(f"   ⚠️  WARNING: Prediction suspiciously close to last encoder price!")
+                    if target_vs_encoder_diff < 0.001:
+                        print(f"   ⚠️  WARNING: Target suspiciously close to last encoder price!")
+                else:
+                    print(f"   📊 Note: Data appears to be normalized (last encoder price ≈ 0)")
+                    print(f"   📊 Target value: {target_sample:.4f}")
+                    print(f"   📊 Prediction value: {pred_sample:.4f}")
+                    print(f"   📊 Absolute difference: {abs(pred_sample - target_sample):.4f}")
+                    
+                    # For normalized data, check if predictions are suspiciously close to targets
+                    if abs(pred_sample - target_sample) < 0.001:
+                        print(f"   ⚠️  WARNING: Prediction suspiciously close to target (possible overfitting/leakage)!")
+                    else:
+                        print(f"   ✅ Prediction vs target difference appears reasonable")
 
             all_preds.append(predictions.cpu().numpy())
             all_targets.append(targets.cpu().numpy())
@@ -274,6 +393,64 @@ def validate_model(model: nn.Module, loader: DataLoader, criterion: nn.Module, d
     targets = np.concatenate(all_targets, axis=0)
     last_known_prices = np.concatenate(all_last_known, axis=0)
     
+    print(f"📊 Validation Dataset Summary:")
+    print(f"   Total samples: {predictions.shape[0]}")
+    if predictions.ndim > 1:
+        print(f"   Horizon length: {predictions.shape[1]}")
+    
+    # Enhanced data leakage detection
+    print(f"\n🔒 Data Leakage Analysis:")
+    first_predictions = predictions[:, 0] if predictions.ndim > 1 else predictions
+    first_targets = targets[:, 0] if targets.ndim > 1 else targets
+    
+    # Check if data is normalized (last known prices near zero)
+    is_normalized = np.mean(np.abs(last_known_prices)) < 0.1
+    print(f"   Data appears to be normalized: {is_normalized}")
+    print(f"   Mean absolute last encoder price: {np.mean(np.abs(last_known_prices)):.6f}")
+    print(f"   Mean absolute prediction: {np.mean(np.abs(first_predictions)):.6f}")
+    print(f"   Mean absolute target: {np.mean(np.abs(first_targets)):.6f}")
+    
+    # Calculate correlations (safe for normalized data)
+    try:
+        pred_encoder_corr = np.corrcoef(first_predictions, last_known_prices)[0, 1]
+        target_encoder_corr = np.corrcoef(first_targets, last_known_prices)[0, 1]
+        pred_target_corr = np.corrcoef(first_predictions, first_targets)[0, 1]
+        
+        print(f"   Prediction vs Last Encoder Price correlation: {pred_encoder_corr:.4f}")
+        print(f"   Target vs Last Encoder Price correlation: {target_encoder_corr:.4f}")
+        print(f"   Prediction vs Target correlation: {pred_target_corr:.4f}")
+        
+        if not is_normalized:
+            # Traditional leakage checks for non-normalized data
+            if pred_encoder_corr > 0.99:
+                print(f"   ❌ CRITICAL: Predictions are nearly identical to last encoder prices!")
+            elif pred_encoder_corr > 0.95:
+                print(f"   ⚠️  WARNING: Predictions are suspiciously correlated with last encoder prices!")
+            else:
+                print(f"   ✅ Predictions appear independent of last encoder prices")
+        else:
+            # For normalized data, check prediction-target correlation
+            print(f"   📊 Note: Data is normalized - focusing on prediction quality")
+            
+        if pred_target_corr > 0.99:
+            print(f"   ❌ CRITICAL: Predictions are nearly perfect (possible data leakage)!")
+        elif pred_target_corr > 0.95:
+            print(f"   ⚠️  WARNING: Predictions are suspiciously accurate!")
+        elif pred_target_corr > 0.5:
+            print(f"   ✅ Good prediction accuracy (correlation: {pred_target_corr:.3f})")
+        elif pred_target_corr > 0.0:
+            print(f"   📈 Moderate prediction accuracy (correlation: {pred_target_corr:.3f})")
+        else:
+            print(f"   ⚠️  Poor prediction accuracy (correlation: {pred_target_corr:.3f})")
+    except Exception as e:
+        print(f"   ❌ Error calculating correlations: {e}")
+    
+    # Debug information about shapes
+    print(f"[DEBUG] Final validation shapes:")
+    print(f"  Predictions: {predictions.shape}")
+    print(f"  Targets: {targets.shape}")
+    print(f"  Last known prices: {last_known_prices.shape}")
+    
     return predictions, targets, last_known_prices
 
 # --- Plotting Functions ---
@@ -285,96 +462,298 @@ def plot_evaluation_suite(predictions: np.ndarray, targets: np.ndarray, last_kno
     print(f"  Plotting for {model_name}. Predictions shape: {predictions.shape}, Targets shape: {targets.shape}")
 
     try:
-        # --- 1. Price Prediction Trajectory Plot ---
-        print("    - Generating price prediction trajectory plot...")
-        fig, ax = plt.subplots(figsize=(15, 7))
-        num_examples = min(5, len(predictions))
+        # Check if predictions need to be converted to absolute prices
+        preds = np.asarray(predictions, dtype=np.float32)
+        trues = np.asarray(targets, dtype=np.float32)
+        last_prices = np.asarray(last_known_prices, dtype=np.float32)
+        
+        # Convert relative predictions to absolute prices if needed
+        if np.abs(preds).mean() < np.abs(trues).mean() * 0.1:
+            preds = preds + last_prices[:, None]
+        
+        # --- 1. Enhanced Price Prediction Trajectory Plot ---
+        print("    - Generating enhanced price prediction trajectory plot...")
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 12))
+        
+        # Top subplot: Sample trajectories
+        num_examples = min(10, len(preds))
+        indices = np.random.choice(len(preds), num_examples, replace=False)
+        # Generate colors for each trajectory
+        colors = []
         for i in range(num_examples):
-            full_actual = np.concatenate(([last_known_prices[i]], targets[i]))
-            full_pred = np.concatenate(([last_known_prices[i]], predictions[i]))
-            time_steps = np.arange(len(full_actual))
-            ax.plot(time_steps, full_actual, '--', label=f'Actual Trajectory {i+1}')
-            ax.plot(time_steps, full_pred, '-', label=f'Predicted Trajectory {i+1}')
-        ax.set_title(f'{symbol} - {model_name}: Price Prediction Trajectories')
-        ax.set_xlabel('Time Steps (0 = Last Known Price)')
-        ax.set_ylabel('Price')
-        ax.legend()
-        ax.grid(True)
-        plt.savefig(os.path.join(plot_dir, f'{symbol}_{model_name}_price_predictions.png'))
+            colors.append(plt.cm.get_cmap('viridis')(i / max(1, num_examples - 1)))
+        
+        for idx, i in enumerate(indices):
+            # Create full trajectory including last known price
+            days = np.arange(-1, predict_len)  # -1 for last known, 0 to predict_len-1 for forecast
+            actual_trajectory = np.concatenate(([last_prices[i]], trues[i]))
+            pred_trajectory = np.concatenate(([last_prices[i]], preds[i]))
+            
+            ax1.plot(days, actual_trajectory, '--', color=colors[idx], alpha=0.7, 
+                    label=f'Actual {idx+1}' if idx < 3 else "")
+            ax1.plot(days, pred_trajectory, '-', color=colors[idx], alpha=0.8, 
+                    label=f'Predicted {idx+1}' if idx < 3 else "")
+        
+        ax1.axvline(x=0, color='red', linestyle=':', alpha=0.8, label='Prediction Start')
+        ax1.set_title(f'{symbol} - {model_name}: Price Prediction Trajectories (Sample)')
+        ax1.set_xlabel('Days from Prediction Start')
+        ax1.set_ylabel('Price ($)')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Bottom subplot: Average trajectory with confidence intervals
+        mean_actual = np.mean(trues, axis=0)
+        mean_pred = np.mean(preds, axis=0)
+        std_actual = np.std(trues, axis=0)
+        std_pred = np.std(preds, axis=0)
+        
+        days_forecast = np.arange(predict_len)
+        
+        ax2.fill_between(days_forecast, mean_actual - std_actual, mean_actual + std_actual, 
+                        alpha=0.3, color='blue', label='Actual ±1σ')
+        ax2.fill_between(days_forecast, mean_pred - std_pred, mean_pred + std_pred, 
+                        alpha=0.3, color='orange', label='Predicted ±1σ')
+        ax2.plot(days_forecast, mean_actual, '--', color='blue', linewidth=2, label='Actual Mean')
+        ax2.plot(days_forecast, mean_pred, '-', color='orange', linewidth=2, label='Predicted Mean')
+        
+        ax2.set_title(f'{symbol} - {model_name}: Average Prediction Performance')
+        ax2.set_xlabel('Days into Forecast Horizon')
+        ax2.set_ylabel('Price ($)')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(plot_dir, f'{symbol}_{model_name}_price_predictions.png'), dpi=150)
         plt.close(fig)
-        print("    - Price prediction plot saved.")
+        print("    - Enhanced price prediction plot saved.")
 
         # --- 2. Final Price Scatter Plot ---
         print("    - Generating final price scatter plot...")
-        final_preds, final_targets = predictions[:, -1], targets[:, -1]
-        fig, ax = plt.subplots(figsize=(8, 8))
-        sns.scatterplot(x=final_targets, y=final_preds, alpha=0.6, ax=ax)
-        ax.plot([min(final_targets), max(final_targets)], [min(final_targets), max(final_targets)], 'r--')
-        ax.set_title(f'{symbol} - {model_name}: Final Predicted Price vs. Actual')
-        ax.set_xlabel('Actual Final Price')
-        ax.set_ylabel('Predicted Final Price')
-        ax.grid(True)
-        plt.savefig(os.path.join(plot_dir, f'{symbol}_{model_name}_final_price_scatter.png'))
+        final_preds, final_targets = preds[:, -1], trues[:, -1]
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        # Create scatter plot with alpha based on density
+        ax.scatter(final_targets, final_preds, alpha=0.6, s=20, edgecolors='none')
+        
+        # Perfect prediction line
+        min_val = np.minimum(np.min(final_targets), np.min(final_preds))
+        max_val = np.maximum(np.max(final_targets), np.max(final_preds))
+        ax.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Perfect Prediction')
+        
+        # Calculate and display R²
+        try:
+            r2_final = r2_score(final_targets, final_preds)
+            ax.text(0.05, 0.95, f'R² = {r2_final:.3f}', transform=ax.transAxes, 
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        except:
+            pass
+        
+        ax.set_title(f'{symbol} - {model_name}: Final Day Prediction vs. Actual')
+        ax.set_xlabel('Actual Final Price ($)')
+        ax.set_ylabel('Predicted Final Price ($)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(os.path.join(plot_dir, f'{symbol}_{model_name}_final_price_scatter.png'), dpi=150)
         plt.close(fig)
         print("    - Final price scatter plot saved.")
 
-        # --- 3. Cumulative Returns Comparison ---
-        print("    - Generating cumulative returns plot...")
-        actual_returns = (targets[:, 0] - last_known_prices) / (last_known_prices + 1e-9)
-        pred_returns = (predictions[:, 0] - last_known_prices) / (last_known_prices + 1e-9)
-        pred_signals = (pred_returns > 0).astype(int)
-        strategy_returns = pred_signals * actual_returns
+        # --- 3. Enhanced Cumulative Returns Comparison ---
+        print("    - Generating enhanced cumulative returns plot...")
         
-        fig = plt.figure(figsize=(15, 7))
-        plt.plot(np.cumsum(actual_returns), label='Buy and Hold Cumulative Returns', color='royalblue')
-        plt.plot(np.cumsum(strategy_returns), label=f'{model_name} Strategy Cumulative Returns', color='darkorange')
-        plt.title(f'{symbol} - {model_name}: Cumulative Returns Comparison (1-Day Horizon)')
-        plt.xlabel('Time (Samples)')
-        plt.ylabel('Cumulative Return')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(os.path.join(plot_dir, f'{symbol}_{model_name}_cumulative_returns.png'))
+        # Calculate returns for different horizons
+        horizons_to_test = [1, predict_len//4, predict_len//2, predict_len-1] if predict_len > 4 else [1, predict_len-1]
+        horizons_to_test = [h for h in horizons_to_test if h < predict_len]
+        
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        axes = axes.flatten()
+        
+        for idx, horizon in enumerate(horizons_to_test[:4]):
+            if idx >= len(axes):
+                break
+                
+            # Calculate returns
+            actual_returns = (trues[:, horizon] - last_prices) / (last_prices + 1e-9)
+            pred_returns = (preds[:, horizon] - last_prices) / (last_prices + 1e-9)
+            
+            # Simple strategy: go long if predicted return > 0
+            pred_signals = (pred_returns > 0).astype(int)
+            strategy_returns = pred_signals * actual_returns
+            
+            # Cumulative returns
+            cum_actual = np.cumsum(actual_returns)
+            cum_strategy = np.cumsum(strategy_returns)
+            
+            ax = axes[idx]
+            ax.plot(cum_actual, label='Buy and Hold', color='blue', linewidth=2)
+            ax.plot(cum_strategy, label=f'{model_name} Strategy', color='orange', linewidth=2)
+            
+            # Calculate strategy metrics
+            strategy_sharpe = np.mean(strategy_returns) / (np.std(strategy_returns) + 1e-9) * np.sqrt(252)
+            buy_hold_sharpe = np.mean(actual_returns) / (np.std(actual_returns) + 1e-9) * np.sqrt(252)
+            
+            ax.set_title(f'Horizon: {horizon+1} Day(s)\nStrategy Sharpe: {strategy_sharpe:.2f}, B&H Sharpe: {buy_hold_sharpe:.2f}')
+            ax.set_xlabel('Time (Samples)')
+            ax.set_ylabel('Cumulative Return')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+        
+        # Hide unused subplots
+        for idx in range(len(horizons_to_test), len(axes)):
+            axes[idx].set_visible(False)
+        
+        plt.suptitle(f'{symbol} - {model_name}: Cumulative Returns Comparison')
+        plt.tight_layout()
+        plt.savefig(os.path.join(plot_dir, f'{symbol}_{model_name}_cumulative_returns.png'), dpi=150)
         plt.close(fig)
-        print("    - Cumulative returns plot saved.")
+        print("    - Enhanced cumulative returns plot saved.")
 
-        # --- 4. Error Distribution Plot ---
-        print("    - Generating error distribution plot...")
-        errors = predictions - targets
-        try:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            print("      - Figure created. Building histogram bars...")
-            values = errors.flatten()
-            counts, bin_edges = np.histogram(values, bins=50, density=True)
-            bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-            ax.bar(bin_centers, counts, width=(bin_edges[1] - bin_edges[0]), alpha=0.7, color='blue')
-            ax.set_title(f'{symbol} - {model_name}: Distribution of Prediction Errors')
-            ax.set_xlabel('Prediction Error (Predicted - Actual)')
-            ax.set_ylabel('Density')
-            ax.grid(True)
-            plt.tight_layout()
-            plt.savefig(os.path.join(plot_dir, f'{symbol}_{model_name}_error_distribution.png'))
-            plt.close(fig)
-            print("    - Error distribution plot saved.")
-        except Exception as e_hist:
-            print(f"    - Error distribution plot skipped due to error: {e_hist}")
-            if 'fig' in locals() and fig is not None:
-                plt.close(fig)
-
-        # --- 5. Detailed Residual Analysis ---
-        print("    - Generating residual analysis plot...")
-        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-        sns.scatterplot(x=predictions.flatten(), y=errors.flatten(), alpha=0.5, ax=axes[0])
-        axes[0].axhline(0, color='red', linestyle='--')
-        axes[0].set_title('Residuals vs. Predicted Values')
-        axes[0].set_xlabel('Predicted Price')
-        axes[0].set_ylabel('Residuals')
-        stats.probplot(errors.flatten(), dist="norm", plot=axes[1])
-        axes[1].set_title('Q-Q Plot of Residuals')
-        fig.suptitle(f'{symbol} - {model_name}: Residual Analysis')
-        plt.tight_layout(rect=(0, 0.03, 1, 0.95))
-        plt.savefig(os.path.join(plot_dir, f'{symbol}_{model_name}_residual_analysis.png'))
+        # --- 4. Enhanced Error Analysis ---
+        print("    - Generating enhanced error analysis...")
+        errors = preds - trues  # Use corrected predictions
+        
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+        
+        # Error distribution
+        values = errors.flatten()
+        n, bins, patches = ax1.hist(values, bins=50, density=True, alpha=0.7, color='skyblue', edgecolor='black')
+        ax1.axvline(0, color='red', linestyle='--', linewidth=2, label='Zero Error')
+        ax1.set_title('Distribution of Prediction Errors')
+        ax1.set_xlabel('Prediction Error ($)')
+        ax1.set_ylabel('Density')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Error over forecast horizon
+        mean_abs_error_by_horizon = np.mean(np.abs(errors), axis=0)
+        std_abs_error_by_horizon = np.std(np.abs(errors), axis=0)
+        days = np.arange(1, predict_len + 1)
+        
+        ax2.plot(days, mean_abs_error_by_horizon, 'o-', color='red', linewidth=2, label='Mean Absolute Error')
+        ax2.fill_between(days, 
+                        mean_abs_error_by_horizon - std_abs_error_by_horizon,
+                        mean_abs_error_by_horizon + std_abs_error_by_horizon,
+                        alpha=0.3, color='red', label='±1σ')
+        ax2.set_title('Error Growth Over Forecast Horizon')
+        ax2.set_xlabel('Days into Forecast')
+        ax2.set_ylabel('Mean Absolute Error ($)')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        # R² over forecast horizon
+        r2_by_horizon = []
+        for i in range(predict_len):
+            try:
+                r2_h = r2_score(trues[:, i], preds[:, i])
+                r2_by_horizon.append(r2_h)
+            except:
+                r2_by_horizon.append(0)
+        
+        ax3.plot(days, r2_by_horizon, 's-', color='green', linewidth=2, label='R² Score')
+        ax3.axhline(0, color='black', linestyle=':', alpha=0.5)
+        ax3.set_title('Prediction Quality Over Forecast Horizon')
+        ax3.set_xlabel('Days into Forecast')
+        ax3.set_ylabel('R² Score')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        
+        # Residuals vs predicted (diagnostic)
+        sample_size = min(1000, len(preds))  # Sample for performance
+        indices = np.random.choice(len(preds), sample_size, replace=False)
+        pred_sample = preds[indices].flatten()
+        error_sample = errors[indices].flatten()
+        
+        ax4.scatter(pred_sample, error_sample, alpha=0.5, s=10)
+        ax4.axhline(0, color='red', linestyle='--', linewidth=2)
+        ax4.set_title('Residuals vs. Predicted Values')
+        ax4.set_xlabel('Predicted Price ($)')
+        ax4.set_ylabel('Residual (Predicted - Actual)')
+        ax4.grid(True, alpha=0.3)
+        
+        plt.suptitle(f'{symbol} - {model_name}: Error Analysis')
+        plt.tight_layout()
+        plt.savefig(os.path.join(plot_dir, f'{symbol}_{model_name}_error_analysis.png'), dpi=150)
         plt.close(fig)
-        print("    - Residual analysis plot saved.")
+        print("    - Enhanced error analysis plot saved.")
+
+        # --- 5. Horizon-Specific Performance Metrics ---
+        print("    - Generating horizon-specific performance metrics...")
+        
+        # Calculate directional accuracy for each horizon
+        directional_accuracy = []
+        for i in range(predict_len):
+            actual_direction = trues[:, i] > last_prices
+            pred_direction = preds[:, i] > last_prices
+            accuracy = np.mean(actual_direction == pred_direction)
+            directional_accuracy.append(accuracy)
+        
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 10))
+        
+        # Directional accuracy over horizon
+        ax1.plot(days, directional_accuracy, 'o-', color='purple', linewidth=2, markersize=6)
+        ax1.axhline(0.5, color='red', linestyle='--', alpha=0.7, label='Random Guess')
+        ax1.set_title('Directional Accuracy Over Forecast Horizon')
+        ax1.set_xlabel('Days into Forecast')
+        ax1.set_ylabel('Directional Accuracy')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        ax1.set_ylim(0, 1)
+        
+        # Correlation over horizon
+        correlations = []
+        for i in range(predict_len):
+            try:
+                corr = np.corrcoef(trues[:, i], preds[:, i])[0, 1]
+                correlations.append(corr)
+            except:
+                correlations.append(0)
+        
+        ax2.plot(days, correlations, 's-', color='orange', linewidth=2, markersize=6)
+        ax2.axhline(0, color='black', linestyle=':', alpha=0.5)
+        ax2.set_title('Correlation Over Forecast Horizon')
+        ax2.set_xlabel('Days into Forecast')
+        ax2.set_ylabel('Pearson Correlation')
+        ax2.grid(True, alpha=0.3)
+        ax2.set_ylim(-1, 1)
+        
+        # Relative MSE vs baseline
+        baseline_preds_local = np.tile(last_prices[:, None], (1, predict_len))  # Constant last price prediction
+        baseline_mse_by_horizon = np.mean((baseline_preds_local - trues)**2, axis=0)
+        model_mse_by_horizon = np.mean((preds - trues)**2, axis=0)
+        relative_mse = model_mse_by_horizon / (baseline_mse_by_horizon + 1e-9)
+        
+        ax3.plot(days, relative_mse, '^-', color='red', linewidth=2, markersize=6)
+        ax3.axhline(1, color='black', linestyle='--', alpha=0.7, label='Baseline Performance')
+        ax3.set_title('Relative MSE vs. Naive Baseline')
+        ax3.set_xlabel('Days into Forecast')
+        ax3.set_ylabel('Model MSE / Baseline MSE')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        ax3.set_yscale('log')
+        
+        # Prediction confidence intervals
+        pred_percentiles = np.percentile(preds, [10, 25, 50, 75, 90], axis=0)
+        actual_percentiles = np.percentile(trues, [10, 25, 50, 75, 90], axis=0)
+        
+        ax4.fill_between(days, pred_percentiles[0], pred_percentiles[4], alpha=0.2, color='blue', label='Pred 10-90%')
+        ax4.fill_between(days, pred_percentiles[1], pred_percentiles[3], alpha=0.3, color='blue', label='Pred 25-75%')
+        ax4.plot(days, pred_percentiles[2], '-', color='blue', linewidth=2, label='Pred Median')
+        
+        ax4.fill_between(days, actual_percentiles[0], actual_percentiles[4], alpha=0.2, color='green', label='Actual 10-90%')
+        ax4.fill_between(days, actual_percentiles[1], actual_percentiles[3], alpha=0.3, color='green', label='Actual 25-75%')
+        ax4.plot(days, actual_percentiles[2], '--', color='green', linewidth=2, label='Actual Median')
+        
+        ax4.set_title('Prediction vs. Actual Distribution')
+        ax4.set_xlabel('Days into Forecast')
+        ax4.set_ylabel('Price ($)')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        
+        plt.suptitle(f'{symbol} - {model_name}: Horizon-Specific Performance Metrics')
+        plt.tight_layout()
+        plt.savefig(os.path.join(plot_dir, f'{symbol}_{model_name}_horizon_metrics.png'), dpi=150)
+        plt.close(fig)
+        print("    - Horizon-specific performance metrics plot saved.")
         
     except Exception as e:
         print(f"An error occurred during plotting for {model_name}: {e}")
@@ -382,7 +761,7 @@ def plot_evaluation_suite(predictions: np.ndarray, targets: np.ndarray, last_kno
             plt.close(fig)
 
 def plot_all_model_comparison(all_model_results: Dict[str, Dict], plot_dir: str, symbol: str):
-    """Generates and saves a comparison plot for all models."""
+    """Generates and saves a comprehensive comparison plot for all models."""
     os.makedirs(plot_dir, exist_ok=True)
     model_names = list(all_model_results.keys())
     num_models = len(model_names)
@@ -395,58 +774,135 @@ def plot_all_model_comparison(all_model_results: Dict[str, Dict], plot_dir: str,
     try:
         predict_len = all_model_results[model_names[0]]['predictions'].shape[1]
 
-        fig, axes = plt.subplots(2, 2, figsize=(18, 15))
-        fig.suptitle(f'{symbol} - All Models Comparison', fontsize=16)
+        fig, axes = plt.subplots(2, 3, figsize=(20, 12))
+        fig.suptitle(f'{symbol} - All Models Comparison (Horizon: {predict_len} days)', fontsize=16)
 
-        # --- 1. Predicted vs Actual Returns ---
-        ax = axes[0, 0]
+        # Prepare corrected predictions for all models
+        model_data = {}
         for model_name, results in all_model_results.items():
-            actual_returns = (results['targets'][:, -1] - results['last_known_prices']) / results['last_known_prices']
-            pred_returns = (results['predictions'][:, -1] - results['last_known_prices']) / results['last_known_prices']
-            sns.kdeplot(x=actual_returns, y=pred_returns, ax=ax, label=model_name, fill=True, alpha=0.2)
-        ax.set_title('Predicted vs. Actual Returns (Final Horizon)')
-        ax.set_xlabel('Actual Returns')
-        ax.set_ylabel('Predicted Returns')
-        ax.legend()
+            preds = np.asarray(results['predictions'], dtype=np.float32)
+            trues = np.asarray(results['targets'], dtype=np.float32)
+            last_prices = np.asarray(results['last_known_prices'], dtype=np.float32)
+            
+            # Convert relative predictions to absolute if needed
+            if np.abs(preds).mean() < np.abs(trues).mean() * 0.1:
+                preds = preds + last_prices[:, None]
+            
+            model_data[model_name] = {'preds': preds, 'trues': trues, 'last_prices': last_prices}
+
+        # --- 1. Final Horizon R² Comparison ---
+        ax = axes[0, 0]
+        r2_scores = []
+        for model_name, data in model_data.items():
+            try:
+                r2 = r2_score(data['trues'][:, -1], data['preds'][:, -1])
+                r2_scores.append(r2)
+            except:
+                r2_scores.append(0)
+        
+        bars = ax.bar(model_names, r2_scores, color=['skyblue', 'lightcoral', 'lightgreen', 'gold', 'plum'][:len(model_names)])
+        ax.set_title(f'R² Score - Final Day Prediction')
+        ax.set_ylabel('R² Score')
+        ax.tick_params(axis='x', rotation=45)
+        ax.grid(True, alpha=0.3)
+        
+        # Add value labels on bars
+        for bar, score in zip(bars, r2_scores):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                   f'{score:.3f}', ha='center', va='bottom')
 
         # --- 2. Error over Horizon (MAE) ---
         ax = axes[0, 1]
-        for model_name, results in all_model_results.items():
-            errors = np.abs(results['predictions'] - results['targets'])
+        for model_name, data in model_data.items():
+            errors = np.abs(data['preds'] - data['trues'])
             mae_over_horizon = np.mean(errors, axis=0)
-            ax.plot(np.arange(1, predict_len + 1), mae_over_horizon, marker='o', linestyle='-', label=model_name)
-        ax.set_title('Mean Absolute Error (MAE) over Horizon')
-        ax.set_xlabel('Prediction Horizon (Steps)')
-        ax.set_ylabel('MAE')
+            ax.plot(np.arange(1, predict_len + 1), mae_over_horizon, marker='o', linestyle='-', 
+                   label=model_name, linewidth=2, markersize=4)
+        ax.set_title('Mean Absolute Error Over Horizon')
+        ax.set_xlabel('Days into Forecast')
+        ax.set_ylabel('MAE ($)')
         ax.legend()
-        ax.grid(True)
+        ax.grid(True, alpha=0.3)
 
-        # --- 3. Residuals Distribution ---
+        # --- 3. R² over Horizon ---
+        ax = axes[0, 2]
+        for model_name, data in model_data.items():
+            r2_over_horizon = []
+            for i in range(predict_len):
+                try:
+                    r2_h = r2_score(data['trues'][:, i], data['preds'][:, i])
+                    r2_over_horizon.append(r2_h)
+                except:
+                    r2_over_horizon.append(0)
+            ax.plot(np.arange(1, predict_len + 1), r2_over_horizon, marker='s', linestyle='-', 
+                   label=model_name, linewidth=2, markersize=4)
+        ax.axhline(0, color='black', linestyle=':', alpha=0.5)
+        ax.set_title('R² Score Over Horizon')
+        ax.set_xlabel('Days into Forecast')
+        ax.set_ylabel('R² Score')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # --- 4. Directional Accuracy Comparison ---
         ax = axes[1, 0]
-        for model_name, results in all_model_results.items():
-            errors = (results['predictions'] - results['targets']).flatten()
-            sns.kdeplot(errors, ax=ax, label=model_name, fill=True, alpha=0.2)
-        ax.set_title('Distribution of Residuals (All Horizons)')
-        ax.set_xlabel('Error (Predicted - Actual)')
-        ax.legend()
-
-        # --- 4. Directional Accuracy ---
-        ax = axes[1, 1]
         accuracies = []
-        for model_name, results in all_model_results.items():
-            actual_direction = (results['targets'] > np.roll(results['targets'], 1, axis=1))[:, 1:]
-            pred_direction = (results['predictions'] > np.roll(results['targets'], 1, axis=1))[:, 1:]
+        for model_name, data in model_data.items():
+            # Direction relative to last known price
+            actual_direction = data['trues'] > data['last_prices'][:, None]
+            pred_direction = data['preds'] > data['last_prices'][:, None]
             accuracy = np.mean(actual_direction == pred_direction)
             accuracies.append(accuracy)
         
-        sns.barplot(x=model_names, y=accuracies, ax=ax)
+        bars = ax.bar(model_names, accuracies, color=['skyblue', 'lightcoral', 'lightgreen', 'gold', 'plum'][:len(model_names)])
+        ax.axhline(0.5, color='red', linestyle='--', alpha=0.7, label='Random Guess')
         ax.set_title('Overall Directional Accuracy')
         ax.set_ylabel('Accuracy Score')
         ax.tick_params(axis='x', rotation=45)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
         ax.set_ylim(0, 1)
+        
+        # Add value labels on bars
+        for bar, acc in zip(bars, accuracies):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                   f'{acc:.3f}', ha='center', va='bottom')
 
-        plt.tight_layout(rect=(0, 0.03, 1, 0.95))
-        plt.savefig(os.path.join(plot_dir, f'{symbol}_all_models_comparison.png'))
+        # --- 5. Final Price Correlation ---
+        ax = axes[1, 1]
+        correlations = []
+        for model_name, data in model_data.items():
+            try:
+                corr = np.corrcoef(data['trues'][:, -1], data['preds'][:, -1])[0, 1]
+                correlations.append(corr)
+            except:
+                correlations.append(0)
+        
+        bars = ax.bar(model_names, correlations, color=['skyblue', 'lightcoral', 'lightgreen', 'gold', 'plum'][:len(model_names)])
+        ax.set_title('Final Day Price Correlation')
+        ax.set_ylabel('Pearson Correlation')
+        ax.tick_params(axis='x', rotation=45)
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(-1, 1)
+        
+        # Add value labels on bars
+        for bar, corr in zip(bars, correlations):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                   f'{corr:.3f}', ha='center', va='bottom')
+
+        # --- 6. Model Complexity vs Performance ---
+        ax = axes[1, 2]
+        # This would require parameter counts - placeholder for now
+        ax.text(0.5, 0.5, 'Model Complexity\nvs Performance\n(requires param counts)', 
+               ha='center', va='center', transform=ax.transAxes, fontsize=12)
+        ax.set_title('Model Complexity vs Performance')
+        ax.set_xlabel('Model Parameters')
+        ax.set_ylabel('Final R² Score')
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(plot_dir, f'{symbol}_all_models_comparison.png'), dpi=150)
         plt.close(fig) # Close the figure explicitly
     except Exception as e:
         print(f"An error occurred during plotting: {e}")
@@ -462,6 +918,7 @@ def run_deep_learning_baselines():
     parser.add_argument('--clear-cache', action='store_true', help='Clear cache before running')
     parser.add_argument('--epochs', type=int, default=50, help='Number of training epochs')
     parser.add_argument('--symbol', type=str, default='AAPL', help='Stock symbol to train on.')
+    parser.add_argument('--horizon-days', type=int, default=30, help='Prediction horizon in days (default: 30)')
     parser.add_argument('--skip-training', action='store_true', help='Skip training and generate plots from a results directory.')
     parser.add_argument('--run-dir', type=str, default=None, help='Specify a run directory to generate plots from (requires --skip-training).')
     args = parser.parse_args()
@@ -478,7 +935,8 @@ def run_deep_learning_baselines():
         'val_start_date': '2021-01-01',
         'val_end_date': '2021-12-31',
         'encoder_len': 90,
-        'predict_len': 30,
+        'predict_len': args.horizon_days,  # Use horizon parameter
+        'horizon_days': args.horizon_days,  # Store horizon for reference
         'batch_size': 64,
         'hidden_size': 64,
         'num_layers': 2,
@@ -523,8 +981,13 @@ def run_deep_learning_baselines():
         print(f"Configuration: {json.dumps(config, indent=4)}")
         device = torch.device(config['device'])
 
-        # --- Data Loading ---
+        # --- Data Loading with Enhanced Debugging ---
         print("\n--- Loading Data ---")
+        print(f"📊 Training period: {config['start_date']} to {config['end_date']}")
+        print(f"📊 Validation period: {config['val_start_date']} to {config['val_end_date']}")
+        print(f"📊 Horizon length: {config['horizon_days']} days")
+        print(f"📊 Encoder length: {config['encoder_len']} days")
+        
         train_loader = get_data_loader(
             symbols=[config['symbol']], start=config['start_date'], end=config['end_date'],
             encoder_len=config['encoder_len'], predict_len=config['predict_len'], batch_size=config['batch_size']
@@ -533,6 +996,64 @@ def run_deep_learning_baselines():
             symbols=[config['symbol']], start=config['val_start_date'], end=config['val_end_date'],
             encoder_len=config['encoder_len'], predict_len=config['predict_len'], batch_size=config['batch_size']
         )
+
+        # --- Enhanced Data Inspection ---
+        print("\n--- Inspecting Data Quality and Leakage Prevention ---")
+        try:
+            # Check training data
+            train_sample_x, train_sample_y = next(iter(train_loader))
+            print(f"📈 Training data sample:")
+            print(f"   Batch size: {train_sample_x['encoder_cont'].shape[0]}")
+            print(f"   Encoder sequence length: {train_sample_x['encoder_cont'].shape[1]}")
+            print(f"   Feature dimensions: {train_sample_x['encoder_cont'].shape[2]}")
+            
+            if isinstance(train_sample_y, (list, tuple)):
+                target_shape = train_sample_y[0].shape
+                target_sample = train_sample_y[0][:3].cpu().numpy()
+            else:
+                target_shape = train_sample_y.shape
+                target_sample = train_sample_y[:3].cpu().numpy()
+            print(f"   Target shape: {target_shape}")
+            print(f"   Sample targets (first 3 samples): {target_sample}")
+            
+            # Check encoder target (last known prices)
+            encoder_target = train_sample_x['encoder_target'][:3, -5:].cpu().numpy()
+            print(f"   Last 5 encoder prices (first 3 samples): {encoder_target}")
+            
+            # Check validation data
+            val_sample_x, val_sample_y = next(iter(validation_loader))
+            print(f"📉 Validation data sample:")
+            print(f"   Batch size: {val_sample_x['encoder_cont'].shape[0]}")
+            if isinstance(val_sample_y, (list, tuple)):
+                val_target_sample = val_sample_y[0][:3].cpu().numpy()
+            else:
+                val_target_sample = val_sample_y[:3].cpu().numpy()
+            print(f"   Sample targets (first 3 samples): {val_target_sample}")
+            
+            val_encoder_target = val_sample_x['encoder_target'][:3, -5:].cpu().numpy()
+            print(f"   Last 5 encoder prices (first 3 samples): {val_encoder_target}")
+            
+            # Data leakage check: ensure no overlap in time periods
+            print(f"🔒 Data leakage check:")
+            print(f"   Training ends: {config['end_date']}")
+            print(f"   Validation starts: {config['val_start_date']}")
+            
+            train_end = datetime.strptime(config['end_date'], '%Y-%m-%d')
+            val_start = datetime.strptime(config['val_start_date'], '%Y-%m-%d')
+            gap_days = (val_start - train_end).days
+            print(f"   Time gap: {gap_days} days")
+            
+            if gap_days < 0:
+                print(f"   ❌ ERROR: Validation period overlaps with training period!")
+                raise ValueError("Data leakage detected: validation period overlaps with training period")
+            elif gap_days == 0:
+                print(f"   ⚠️  WARNING: No gap between training and validation")
+            else:
+                print(f"   ✅ No temporal leakage detected")
+                
+        except Exception as e:
+            print(f"ERROR during data inspection: {e}")
+            sys.exit(1)
 
         # --- Determine input_feature_dim from data ---
         print("\n--- Determining model input dimensions from data ---")
@@ -573,7 +1094,8 @@ def run_deep_learning_baselines():
                 # Step scheduler after each epoch
                 scheduler.step()
                 # Validate
-                predictions, targets, _ = validate_model(model, validation_loader, criterion, device)
+                predictions, targets, _ = validate_model(model, validation_loader, criterion, device, 
+                                                        horizon_days=config['horizon_days'], debug_mode=False)
                 if predictions is None or targets is None:
                     print(f"Validation returned no results at epoch {epoch+1}")
                     break
@@ -598,7 +1120,8 @@ def run_deep_learning_baselines():
             print(f"✅ {model_name} training complete. Best val_loss: {best_val_loss:.4f}")
 
             print(f"Validating {model_name}...")
-            predictions, targets, last_known_prices = validate_model(model, validation_loader, criterion, device)
+            predictions, targets, last_known_prices = validate_model(model, validation_loader, criterion, device,
+                                                                     horizon_days=config['horizon_days'], debug_mode=True)
             
             if predictions is not None:
                 all_model_results[model_name] = {
@@ -606,64 +1129,97 @@ def run_deep_learning_baselines():
                 }
                 # Count parameters
                 num_params = sum(p.numel() for p in model.parameters())
-                # Compute metrics
-                preds = np.asarray(predictions)
-                trues = np.asarray(targets)
-                # Reconstruct absolute predictions from model outputs and last known price
-                preds = np.asarray(predictions)
-                trues = np.asarray(targets)
-                last_prices = np.asarray(last_known_prices)
-                # Model outputs are absolute future prices or deltas? Add last known price to get absolute
-                preds = preds + last_prices[:, None]
-                # Debug: print min/max of predictions, targets, and last known prices
-                print(f"[DEBUG] preds range: {preds.min():.4f}-{preds.max():.4f}, trues range: {trues.min():.4f}-{trues.max():.4f}, last_prices range: {last_prices.min():.4f}-{last_prices.max():.4f}")
-                # Compute naive baseline predictions (constant last known price)
+                
+                # Convert to numpy arrays for metrics calculation
+                preds = np.asarray(predictions, dtype=np.float32)
+                trues = np.asarray(targets, dtype=np.float32)
+                last_prices = np.asarray(last_known_prices, dtype=np.float32)
+                
+                # Debug: Check if predictions are absolute prices or relative changes
+                print(f"[DEBUG] Raw predictions range: {preds.min():.4f}-{preds.max():.4f}")
+                print(f"[DEBUG] Raw targets range: {trues.min():.4f}-{trues.max():.4f}")
+                print(f"[DEBUG] Last known prices range: {last_prices.min():.4f}-{last_prices.max():.4f}")
+                
+                # Ensure predictions and targets are in the same scale (absolute prices)
+                # If predictions are relative changes, convert to absolute prices
+                if np.abs(preds).mean() < np.abs(trues).mean() * 0.1:  # Heuristic to detect relative predictions
+                    print("[DEBUG] Converting relative predictions to absolute prices")
+                    preds = preds + last_prices[:, None]
+                else:
+                    print("[DEBUG] Predictions appear to be absolute prices already")
+                
+                print(f"[DEBUG] Final preds range: {preds.min():.4f}-{preds.max():.4f}")
+                print(f"[DEBUG] Final trues range: {trues.min():.4f}-{trues.max():.4f}")
+                
+                # Compute baseline predictions (constant last known price)
                 baseline_preds = np.tile(last_prices[:, None], (1, preds.shape[1]))
-                # Flatten for metrics
-                baseline_flat = baseline_preds.flatten()
-                true_flat = trues.flatten()
-                # Baseline metrics
-                baseline_mse = mean_squared_error(true_flat, baseline_flat)
-                try:
-                    baseline_r2 = r2_score(true_flat, baseline_flat)
-                except Exception:
-                    baseline_r2 = float('nan')
-                print(f"[DEBUG] Baseline MSE: {baseline_mse:.4f}, Baseline R2: {baseline_r2:.4f}")
-
-                # Compute per-horizon MSE and MAE on absolute values
-                mse = np.mean((preds - trues)**2, axis=0).tolist()
-                mae = np.mean(np.abs(preds - trues), axis=0).tolist()
-
-                # Compute per-horizon Pearson correlation for diagnostics
-                corr_list = []
+                
+                # Compute per-horizon metrics
+                mse_per_horizon = np.mean((preds - trues)**2, axis=0)
+                mae_per_horizon = np.mean(np.abs(preds - trues), axis=0)
+                
+                # Compute per-horizon R² and correlation
+                r2_per_horizon = []
+                corr_per_horizon = []
                 for i in range(preds.shape[1]):
                     yt, yp = trues[:, i], preds[:, i]
                     try:
-                        corr_list.append(float(np.corrcoef(yt, yp)[0,1]))
+                        # Calculate R² for this horizon
+                        r2_h = r2_score(yt, yp)
+                        r2_per_horizon.append(float(r2_h))
                     except Exception:
-                        corr_list.append(float('nan'))
-                # Single R2 over all absolute predictions
-                trues_flat = trues.flatten()
+                        r2_per_horizon.append(float('nan'))
+                    
+                    try:
+                        # Calculate Pearson correlation for this horizon
+                        corr_h = np.corrcoef(yt, yp)[0, 1]
+                        corr_per_horizon.append(float(corr_h))
+                    except Exception:
+                        corr_per_horizon.append(float('nan'))
+                
+                # Overall metrics across all horizons
                 preds_flat = preds.flatten()
-                # Compute unified R² across all horizons using variance-weighted multioutput
+                trues_flat = trues.flatten()
+                baseline_flat = baseline_preds.flatten()
+                
+                # Overall R² calculation
                 try:
-                    r2_flat = r2_score(trues, preds, multioutput='variance_weighted')
+                    overall_r2 = r2_score(trues_flat, preds_flat)
                 except Exception:
-                    r2_flat = float('nan')
-
-                avg_mse = float(np.mean(mse))
-                avg_mae = float(np.mean(mae))
+                    overall_r2 = float('nan')
+                
+                # Baseline metrics for comparison
+                try:
+                    baseline_r2 = r2_score(trues_flat, baseline_flat)
+                    baseline_mse = mean_squared_error(trues_flat, baseline_flat)
+                except Exception:
+                    baseline_r2 = float('nan')
+                    baseline_mse = float('nan')
+                
+                # Average metrics
+                avg_mse = float(np.mean(mse_per_horizon))
+                avg_mae = float(np.mean(mae_per_horizon))
+                avg_r2 = float(np.nanmean(r2_per_horizon))  # Use nanmean to handle NaN values
+                
                 metrics_stats[model_name] = {
                     'train_loss': train_loss,
                     'val_mse': avg_mse,
-                    'mse_over_time': mse,
+                    'mse_over_time': mse_per_horizon.tolist(),
                     'val_mae': avg_mae,
-                    'mae_over_time': mae,
-                    'r2': r2_flat,
-                    'corr_over_time': corr_list,
+                    'mae_over_time': mae_per_horizon.tolist(),
+                    'r2': overall_r2,
+                    'r2_over_time': r2_per_horizon,
+                    'avg_r2': avg_r2,
+                    'corr_over_time': corr_per_horizon,
+                    'baseline_r2': baseline_r2,
+                    'baseline_mse': baseline_mse,
                     'num_params': num_params
                 }
-                print(f"📊 {model_name} stats -> params: {num_params}, avg_mse: {avg_mse:.4f}, avg_mae: {avg_mae:.4f}, r2: {r2_flat:.4f}")
+                
+                print(f"📊 {model_name} stats -> params: {num_params}")
+                print(f"    MSE: {avg_mse:.4f}, MAE: {avg_mae:.4f}")
+                print(f"    Overall R²: {overall_r2:.4f}, Avg R²: {avg_r2:.4f}")
+                print(f"    Baseline R²: {baseline_r2:.4f}, Baseline MSE: {baseline_mse:.4f}")
                 # Save model checkpoint
                 checkpoint_path = os.path.join(run_dir, f'{model_name}_checkpoint.pt')
                 torch.save(model.state_dict(), checkpoint_path)
@@ -674,7 +1230,7 @@ def run_deep_learning_baselines():
 
         # --- Summary Table ---
         print("\nModel Performance Summary:")
-        header = f"{'Model':<20}{'Train Loss':<15}{'Val MSE':<15}{'Val MAE':<15}{'Avg R2':<10}"
+        header = f"{'Model':<20}{'Train Loss':<15}{'Val MSE':<15}{'Val MAE':<15}{'Overall R²':<12}{'Avg R²':<10}{'Params':<10}"
         print(header)
         print('-' * len(header))
         for m, stats_ in metrics_stats.items():
@@ -682,8 +1238,13 @@ def run_deep_learning_baselines():
             train_loss = stats_.get('train_loss', float('nan'))
             val_mse = stats_.get('val_mse', stats_.get('mse', float('nan')))
             val_mae = stats_.get('val_mae', stats_.get('mae', float('nan')))
-            avg_r2 = stats_.get('avg_r2', stats_.get('r2', float('nan')))
-            print(f"{m:<20}{train_loss:<15.4f}{val_mse:<15.4f}{val_mae:<15.4f}{avg_r2:<10.4f}")
+            overall_r2 = stats_.get('r2', float('nan'))
+            avg_r2 = stats_.get('avg_r2', overall_r2)
+            num_params = stats_.get('num_params', 0)
+            print(f"{m:<20}{train_loss:<15.4f}{val_mse:<15.4f}{val_mae:<15.4f}{overall_r2:<12.4f}{avg_r2:<10.4f}{num_params:<10}")
+        
+        print(f"\nPrediction Horizon: {config['horizon_days']} days")
+        print(f"Encoder Length: {config['encoder_len']} days")
 
         # --- Save metrics summary to file ---
         metrics_filepath = os.path.join(run_dir, 'metrics_summary.json')
