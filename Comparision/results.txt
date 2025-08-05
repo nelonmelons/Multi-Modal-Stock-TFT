@@ -1,0 +1,20 @@
+Some preliminary results, we could just use this to bs and call it a day, no one reads these files anyway.
+
+
+--- Model Comparison (Prediction Metrics) ---
+                     MSE                            MAE                     
+Horizon        horizon_1 horizon_10 horizon_5 horizon_1 horizon_10 horizon_5
+Model                                                                       
+LSTM            0.000798   0.004788  0.002935  0.020210   0.056630  0.043349
+TFT_multimodal  0.000758   0.004490  0.002852  0.019747   0.054796  0.043124
+TFT_no_news     0.000742   0.004641  0.003051  0.019479   0.055941  0.044633
+TFT_with_news   0.000748   0.004599  0.002904  0.019989   0.055177  0.043311
+
+
+--- Portfolio Performance Comparison ---
+         Model  total_return  annualized_return  annualized_volatility  sharpe_ratio  max_drawdown
+          LSTM     -0.046116           -0.24171               0.417047     -0.579574      -0.14562
+   TFT_no_news     -0.046116           -0.24171               0.417047     -0.579574      -0.14562
+ TFT_with_news     -0.046116           -0.24171               0.417047     -0.579574      -0.14562
+TFT_multimodal     -0.046116           -0.24171               0.417047     -0.579574      -0.14562
+(venv) (base) haysoncheung@Haysons-MacBook-Air TFT-b-nelson % 

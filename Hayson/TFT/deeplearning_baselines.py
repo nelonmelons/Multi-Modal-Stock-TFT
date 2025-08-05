@@ -40,6 +40,9 @@ import matplotlib
 matplotlib.use('Agg')  # Set non-GUI backend before importing pyplot
 import matplotlib.pyplot as plt
 import seaborn as sns
+from matplotlib.patches import Rectangle
+from matplotlib.collections import LineCollection
+import matplotlib.dates as mdates
 
 # Try to import scipy for statistical analysis
 
@@ -453,6 +456,137 @@ def validate_model(model: nn.Module, loader: DataLoader, criterion: nn.Module, d
     
     return predictions, targets, last_known_prices
 
+def plot_candlestick_predictions(predictions: np.ndarray, targets: np.ndarray, last_known_prices: np.ndarray, 
+                                model_name: str, plot_dir: str, symbol: str):
+    """Generates candlestick-style plot comparing predictions vs actual prices."""
+    os.makedirs(plot_dir, exist_ok=True)
+    predict_len = predictions.shape[1]
+    
+    print(f"    - Generating candlestick prediction plot...")
+    
+    try:
+        # Check if predictions need to be converted to absolute prices
+        preds = np.asarray(predictions, dtype=np.float32)
+        trues = np.asarray(targets, dtype=np.float32)
+        last_prices = np.asarray(last_known_prices, dtype=np.float32)
+        
+        # Convert relative predictions to absolute prices if needed
+        if np.abs(preds).mean() < np.abs(trues).mean() * 0.1:
+            preds = preds + last_prices[:, None]
+        
+        # Select a subset of samples for clarity (max 50 samples)
+        n_samples = min(50, len(preds))
+        indices = np.linspace(0, len(preds)-1, n_samples, dtype=int)
+        
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 12))
+        
+        # --- Top plot: Individual sample trajectories ---
+        x_days = np.arange(predict_len)
+        
+        for i in indices[:10]:  # Show first 10 samples
+            # Actual trajectory
+            ax1.plot(x_days, trues[i], 'b-', alpha=0.6, linewidth=1.5, label='Actual' if i == indices[0] else "")
+            # Predicted trajectory  
+            ax1.plot(x_days, preds[i], 'r--', alpha=0.6, linewidth=1.5, label='Predicted' if i == indices[0] else "")
+            
+            # Add start point (last known price)
+            ax1.scatter([-1], [last_prices[i]], c='green', s=30, alpha=0.8, 
+                       label='Last Known Price' if i == indices[0] else "")
+        
+        ax1.set_title(f'{symbol} - {model_name}: Price Trajectory Comparison (Sample Paths)')
+        ax1.set_xlabel('Days into Forecast')
+        ax1.set_ylabel('Price ($)')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # --- Bottom plot: Candlestick-style comparison ---
+        # Create OHLC-style data for each day in the horizon
+        days = np.arange(predict_len)
+        
+        # Calculate daily statistics across all samples
+        actual_open = trues[:, 0] if predict_len > 0 else last_prices
+        actual_close = trues[:, -1] if predict_len > 0 else last_prices
+        actual_high = np.max(trues, axis=1) if predict_len > 1 else trues[:, 0]
+        actual_low = np.min(trues, axis=1) if predict_len > 1 else trues[:, 0]
+        
+        pred_open = preds[:, 0] if predict_len > 0 else last_prices
+        pred_close = preds[:, -1] if predict_len > 0 else last_prices
+        pred_high = np.max(preds, axis=1) if predict_len > 1 else preds[:, 0]
+        pred_low = np.min(preds, axis=1) if predict_len > 1 else preds[:, 0]
+        
+        # Calculate percentiles for each day across all samples
+        actual_percentiles = np.percentile(trues, [10, 25, 50, 75, 90], axis=0)
+        pred_percentiles = np.percentile(preds, [10, 25, 50, 75, 90], axis=0)
+        
+        # Plot as box plots with whiskers
+        box_width = 0.3
+        
+        for day in days:
+            # Actual data (blue boxes)
+            ax2.add_patch(Rectangle((day - box_width/2, actual_percentiles[1, day]), 
+                                   box_width, actual_percentiles[3, day] - actual_percentiles[1, day],
+                                   facecolor='lightblue', edgecolor='blue', alpha=0.7))
+            
+            # Predicted data (red boxes)
+            ax2.add_patch(Rectangle((day + box_width/2, pred_percentiles[1, day]), 
+                                   box_width, pred_percentiles[3, day] - pred_percentiles[1, day],
+                                   facecolor='lightcoral', edgecolor='red', alpha=0.7))
+            
+            # Median lines
+            ax2.plot([day - box_width/2, day + box_width/2], 
+                    [actual_percentiles[2, day], actual_percentiles[2, day]], 
+                    'b-', linewidth=2)
+            ax2.plot([day - box_width/2, day + box_width/2], 
+                    [pred_percentiles[2, day], pred_percentiles[2, day]], 
+                    'r-', linewidth=2)
+            
+            # Whiskers (10th to 90th percentiles)
+            ax2.plot([day, day], [actual_percentiles[0, day], actual_percentiles[4, day]], 
+                    'b-', linewidth=1, alpha=0.8)
+            ax2.plot([day, day], [pred_percentiles[0, day], pred_percentiles[4, day]], 
+                    'r-', linewidth=1, alpha=0.8)
+        
+        # Connect medians with lines
+        ax2.plot(days, actual_percentiles[2, :], 'b-', linewidth=2, label='Actual Median', alpha=0.8)
+        ax2.plot(days, pred_percentiles[2, :], 'r--', linewidth=2, label='Predicted Median', alpha=0.8)
+        
+        ax2.set_title(f'{symbol} - {model_name}: Price Distribution Comparison (Box Plot Style)')
+        ax2.set_xlabel('Days into Forecast')
+        ax2.set_ylabel('Price ($)')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(plot_dir, f'{symbol}_{model_name}_candlestick_predictions.png'), dpi=150)
+        plt.close(fig)
+        print("    - Candlestick prediction plot saved.")
+        
+    except Exception as e:
+        print(f"    - Error generating candlestick plot: {e}")
+
+def calculate_model_complexity_metrics(model: nn.Module) -> Dict[str, Any]:
+    """Calculate various complexity metrics for a model."""
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    # Calculate memory usage (approximate)
+    param_memory = sum(p.numel() * p.element_size() for p in model.parameters())
+    buffer_memory = sum(b.numel() * b.element_size() for b in model.buffers())
+    total_memory = param_memory + buffer_memory
+    
+    # Count layers by type
+    layer_counts = {}
+    for name, module in model.named_modules():
+        layer_type = type(module).__name__
+        layer_counts[layer_type] = layer_counts.get(layer_type, 0) + 1
+    
+    return {
+        'total_params': total_params,
+        'trainable_params': trainable_params,
+        'memory_mb': total_memory / (1024 * 1024),
+        'layer_counts': layer_counts
+    }
+
 # --- Plotting Functions ---
 def plot_evaluation_suite(predictions: np.ndarray, targets: np.ndarray, last_known_prices: np.ndarray, model_name: str, plot_dir: str, symbol: str):
     """Generates and saves a suite of evaluation plots for a model."""
@@ -755,12 +889,15 @@ def plot_evaluation_suite(predictions: np.ndarray, targets: np.ndarray, last_kno
         plt.close(fig)
         print("    - Horizon-specific performance metrics plot saved.")
         
+        # --- 6. Candlestick-style Predictions Plot ---
+        plot_candlestick_predictions(predictions, targets, last_known_prices, model_name, plot_dir, symbol)
+        
     except Exception as e:
         print(f"An error occurred during plotting for {model_name}: {e}")
         if fig is not None and plt.fignum_exists(fig.number):
             plt.close(fig)
 
-def plot_all_model_comparison(all_model_results: Dict[str, Dict], plot_dir: str, symbol: str):
+def plot_all_model_comparison(all_model_results: Dict[str, Dict], plot_dir: str, symbol: str, model_complexity: Optional[Dict[str, Dict[str, Any]]] = None):
     """Generates and saves a comprehensive comparison plot for all models."""
     os.makedirs(plot_dir, exist_ok=True)
     model_names = list(all_model_results.keys())
@@ -894,12 +1031,54 @@ def plot_all_model_comparison(all_model_results: Dict[str, Dict], plot_dir: str,
 
         # --- 6. Model Complexity vs Performance ---
         ax = axes[1, 2]
-        # This would require parameter counts - placeholder for now
-        ax.text(0.5, 0.5, 'Model Complexity\nvs Performance\n(requires param counts)', 
-               ha='center', va='center', transform=ax.transAxes, fontsize=12)
-        ax.set_title('Model Complexity vs Performance')
-        ax.set_xlabel('Model Parameters')
-        ax.set_ylabel('Final R² Score')
+        if model_complexity:
+            param_counts = []
+            final_r2_scores = []
+            
+            for model_name in model_names:
+                if model_name in model_complexity:
+                    param_counts.append(model_complexity[model_name]['total_params'])
+                    # Get final R² score
+                    try:
+                        data = model_data[model_name]
+                        r2 = r2_score(data['trues'][:, -1], data['preds'][:, -1])
+                        final_r2_scores.append(r2)
+                    except:
+                        final_r2_scores.append(0)
+            
+            if param_counts and final_r2_scores:
+                # Create scatter plot
+                colors = ['skyblue', 'lightcoral', 'lightgreen', 'gold', 'plum'][:len(model_names)]
+                scatter = ax.scatter(param_counts, final_r2_scores, 
+                                   c=colors, s=100, alpha=0.7, edgecolors='black')
+                
+                # Add model name labels
+                for i, model_name in enumerate(model_names):
+                    if i < len(param_counts):
+                        ax.annotate(model_name, (param_counts[i], final_r2_scores[i]), 
+                                  xytext=(5, 5), textcoords='offset points', fontsize=8)
+                
+                ax.set_xlabel('Model Parameters (count)')
+                ax.set_ylabel('Final R² Score')
+                ax.set_title('Model Complexity vs Performance')
+                ax.grid(True, alpha=0.3)
+                
+                # Add trend line if we have enough points
+                if len(param_counts) > 2:
+                    z = np.polyfit(param_counts, final_r2_scores, 1)
+                    p = np.poly1d(z)
+                    x_trend = np.linspace(min(param_counts), max(param_counts), 100)
+                    ax.plot(x_trend, p(x_trend), "r--", alpha=0.7, label=f'Trend (slope: {z[0]:.2e})')
+                    ax.legend()
+            else:
+                ax.text(0.5, 0.5, 'Model Complexity\nData Not Available', 
+                       ha='center', va='center', transform=ax.transAxes, fontsize=12)
+        else:
+            ax.text(0.5, 0.5, 'Model Complexity\nvs Performance\n(complexity data not provided)', 
+                   ha='center', va='center', transform=ax.transAxes, fontsize=12)
+            ax.set_title('Model Complexity vs Performance')
+            ax.set_xlabel('Model Parameters')
+            ax.set_ylabel('Final R² Score')
 
         plt.tight_layout()
         plt.savefig(os.path.join(plot_dir, f'{symbol}_all_models_comparison.png'), dpi=150)
@@ -1074,10 +1253,19 @@ def run_deep_learning_baselines():
         }
         all_model_results = {}
         metrics_stats = {}
+        model_complexity_data = {}
 
         for model_name, model_class in models_to_run.items():
             print(f"\n--- Running pipeline for {model_name} ---")
             model = model_class(config).to(device)
+            
+            # Calculate model complexity metrics
+            complexity_metrics = calculate_model_complexity_metrics(model)
+            model_complexity_data[model_name] = complexity_metrics
+            print(f"📊 {model_name} Complexity:")
+            print(f"   Parameters: {complexity_metrics['total_params']:,}")
+            print(f"   Memory: {complexity_metrics['memory_mb']:.2f} MB")
+            
             # Use AdamW optimizer for better generalization
             optimizer = AdamW(model.parameters(), lr=config['learning_rate'], weight_decay=0.01)
             # Cosine annealing learning rate scheduler
@@ -1261,6 +1449,10 @@ def run_deep_learning_baselines():
             save_dict[f"{model_name}_last_known_prices"] = data['last_known_prices']
         np.savez_compressed(results_filepath, **save_dict)
         print("✅ Results saved successfully.")
+        
+        # --- Generate plots with model complexity data ---
+        print("Generating final model comparison plot with complexity analysis...")
+        plot_all_model_comparison(all_model_results, run_dir, config['symbol'], model_complexity_data)
 
     # --- Generate plots from the saved file ---
     generate_plots_from_file(results_filepath, config['symbol'], run_dir)
