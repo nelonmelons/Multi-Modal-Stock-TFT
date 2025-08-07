@@ -91,16 +91,24 @@ def evaluate_multi_horizon_predictions(model, data_module, horizons: List[int] =
         
         # Store detailed predictions
         for j in range(len(pred_h)):
-            metadata = all_metadata[j] if j < len(all_metadata) else {'date': f'sample_{j}', 'symbol': 'unknown'}
-            detailed_predictions.append({
-                'date': metadata['date'],
-                'symbol': metadata['symbol'],
-                'horizon': horizon,
-                'prediction': float(pred_h[j]),
-                'actual': float(target_h[j]),
-                'absolute_error': abs(float(pred_h[j]) - float(target_h[j])),
-                'squared_error': (float(pred_h[j]) - float(target_h[j])) ** 2
-            })
+            # Check for valid (non-NaN, finite) predictions and targets
+            pred_val = float(pred_h[j])
+            target_val = float(target_h[j])
+            
+            if np.isfinite(pred_val) and np.isfinite(target_val):
+                metadata = all_metadata[j] if j < len(all_metadata) else {'date': f'sample_{j}', 'symbol': 'unknown'}
+                abs_error = abs(pred_val - target_val)
+                sq_error = (pred_val - target_val) ** 2
+                
+                detailed_predictions.append({
+                    'date': metadata['date'],
+                    'symbol': metadata['symbol'],
+                    'horizon': horizon,
+                    'prediction': pred_val,
+                    'actual': target_val,
+                    'absolute_error': abs_error,
+                    'squared_error': sq_error
+                })
     
     return {
         'horizon_metrics': results,
@@ -118,93 +126,98 @@ def evaluate_sklearn_multi_horizon(model, X_val, y_val, val_df, horizons: List[i
     """
     Evaluate sklearn model predictions over multiple horizons.
     
+    Note: Most sklearn models predict single-step, so we only evaluate horizon 1.
+    Multi-step evaluation would require separate models for each horizon.
+    
     Args:
         model: Trained sklearn model
         X_val: Validation features
-        y_val: Validation targets (multi-step)
+        y_val: Validation targets (first step only for sklearn models)
         val_df: Validation DataFrame with metadata
-        horizons: List of horizons to evaluate
+        horizons: List of horizons to evaluate (only horizon 1 will have real values)
         
     Returns:
         Dict containing evaluation results
     """
-    # Get predictions - sklearn models typically predict single step, we'll replicate
+    # Get single-step predictions
     base_predictions = model.predict(X_val)
     
-    # Create multi-step predictions by replicating single-step prediction
-    max_horizon = max(horizons)
-    if len(base_predictions.shape) == 1:
-        # Single output - replicate for all horizons
-        predictions_array = np.tile(base_predictions.reshape(-1, 1), (1, max_horizon))
-    else:
-        # Multi-output - use as is or truncate/pad
-        predictions_array = base_predictions[:, :max_horizon]
-        if predictions_array.shape[1] < max_horizon:
-            # Pad with last prediction if needed
-            last_col = predictions_array[:, -1:] 
-            padding = np.tile(last_col, (1, max_horizon - predictions_array.shape[1]))
-            predictions_array = np.concatenate([predictions_array, padding], axis=1)
+    # Ensure single dimension
+    if len(base_predictions.shape) > 1:
+        base_predictions = base_predictions.flatten()
     
-    # Ensure y_val has the right shape
-    if len(y_val.shape) == 1:
-        # Single step targets - can't evaluate multi-horizon, use single horizon only
-        horizons = [1]
-        targets_array = y_val.reshape(-1, 1)
-        predictions_array = predictions_array[:, :1]
+    # Get single-step targets
+    if len(y_val.shape) > 1:
+        y_val_single = y_val[:, 0]  # Use first step only
     else:
-        targets_array = y_val[:, :max_horizon]
+        y_val_single = y_val
     
-    # Calculate metrics for each horizon
+    # Ensure same length
+    min_len = min(len(base_predictions), len(y_val_single))
+    base_predictions = base_predictions[:min_len]
+    y_val_single = y_val_single[:min_len]
+    
     results = {}
     detailed_predictions = []
     
-    for i, horizon in enumerate(horizons):
-        if i >= predictions_array.shape[1]:
-            break
+    # Only evaluate horizon 1 for sklearn models (they don't naturally support multi-step)
+    for horizon in horizons:
+        if horizon == 1:
+            # Calculate metrics for horizon 1
+            mse = np.mean((base_predictions - y_val_single) ** 2)
+            mae = np.mean(np.abs(base_predictions - y_val_single))
+            rmse = np.sqrt(mse)
+            mape = np.mean(np.abs((y_val_single - base_predictions) / (y_val_single + 1e-8))) * 100
             
-        pred_h = predictions_array[:, i]
-        target_h = targets_array[:, i] if i < targets_array.shape[1] else targets_array[:, 0]
-        
-        # Calculate metrics
-        mse = np.mean((pred_h - target_h) ** 2)
-        mae = np.mean(np.abs(pred_h - target_h))
-        rmse = np.sqrt(mse)
-        mape = np.mean(np.abs((target_h - pred_h) / (target_h + 1e-8))) * 100
-        
-        results[f'horizon_{horizon}'] = {
-            'MSE': mse,
-            'MAE': mae,
-            'RMSE': rmse,
-            'MAPE': mape
-        }
-        
-        # Store detailed predictions
-        for j in range(len(pred_h)):
-            if j < len(val_df):
-                metadata = val_df.iloc[j]
-                date = metadata.get('date', f'sample_{j}')
-                symbol = metadata.get('symbol', 'unknown')
-            else:
-                date, symbol = f'sample_{j}', 'unknown'
+            results[f'horizon_{horizon}'] = {
+                'MSE': mse,
+                'MAE': mae,
+                'RMSE': rmse,
+                'MAPE': mape
+            }
+            
+            # Store detailed predictions for horizon 1
+            for j in range(len(base_predictions)):
+                pred_val = float(base_predictions[j])
+                actual_val = float(y_val_single[j])
                 
-            detailed_predictions.append({
-                'date': date,
-                'symbol': symbol,
-                'horizon': horizon,
-                'prediction': float(pred_h[j]),
-                'actual': float(target_h[j]),
-                'absolute_error': abs(float(pred_h[j]) - float(target_h[j])),
-                'squared_error': (float(pred_h[j]) - float(target_h[j])) ** 2
-            })
+                # Only store valid (finite) predictions
+                if np.isfinite(pred_val) and np.isfinite(actual_val):
+                    if j < len(val_df):
+                        metadata = val_df.iloc[j]
+                        date = metadata.get('date', f'sample_{j}')
+                        symbol = metadata.get('symbol', 'unknown')
+                    else:
+                        date, symbol = f'sample_{j}', 'unknown'
+                        
+                    detailed_predictions.append({
+                        'date': date,
+                        'symbol': symbol,
+                        'horizon': horizon,
+                        'prediction': pred_val,
+                        'actual': actual_val,
+                        'absolute_error': abs(pred_val - actual_val),
+                        'squared_error': (pred_val - actual_val) ** 2
+                    })
+        else:
+            # For horizons > 1, sklearn models don't have meaningful predictions
+            # We could train separate models for each horizon, but that's beyond scope
+            # For now, mark as not available
+            results[f'horizon_{horizon}'] = {
+                'MSE': np.nan,
+                'MAE': np.nan,
+                'RMSE': np.nan,
+                'MAPE': np.nan
+            }
     
     return {
         'horizon_metrics': results,
         'detailed_predictions': pd.DataFrame(detailed_predictions),
         'summary_stats': {
-            'total_samples': len(predictions_array),
-            'horizons_evaluated': len([h for h in horizons if h <= predictions_array.shape[1]]),
-            'avg_mse': np.mean([results[f'horizon_{h}']['MSE'] for h in horizons if f'horizon_{h}' in results]),
-            'avg_mae': np.mean([results[f'horizon_{h}']['MAE'] for h in horizons if f'horizon_{h}' in results])
+            'total_samples': len(base_predictions),
+            'horizons_evaluated': 1,  # Only horizon 1 is meaningful for sklearn models
+            'avg_mse': results['horizon_1']['MSE'] if 'horizon_1' in results else np.nan,
+            'avg_mae': results['horizon_1']['MAE'] if 'horizon_1' in results else np.nan
         }
     }
 

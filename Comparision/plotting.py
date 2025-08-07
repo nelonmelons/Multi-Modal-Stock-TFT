@@ -150,45 +150,73 @@ def plot_prediction_samples(all_evaluation_results: Dict[str, Dict], save_dir: s
         if 'detailed_predictions' in results and not results['detailed_predictions'].empty:
             df = results['detailed_predictions']
             
-            # Get samples for horizon 1 (most reliable)
-            h1_data = df[df['horizon'] == 1]
-            if len(h1_data) == 0:
-                # Fall back to any horizon if horizon 1 not available
-                h1_data = df[df['horizon'] == df['horizon'].min()]
-            
-            if len(h1_data) > 0:
-                # Sample data points
-                sample_data = h1_data.sample(min(n_samples, len(h1_data)))
+            # Check if DataFrame has required columns
+            required_cols = ['horizon', 'prediction', 'actual']
+            if all(col in df.columns for col in required_cols):
+                # Get samples for horizon 1 (most reliable)
+                h1_data = df[df['horizon'] == 1]
+                if len(h1_data) == 0:
+                    # Fall back to any horizon if horizon 1 not available
+                    h1_data = df[df['horizon'] == df['horizon'].min()]
                 
-                x_pos = range(len(sample_data))
-                predictions = sample_data['prediction'].values
-                actuals = sample_data['actual'].values
-                
-                # Create bar plot comparison
-                width = 0.35
-                ax.bar([x - width/2 for x in x_pos], predictions, width, 
-                      label='Predictions', alpha=0.8, color='skyblue')
-                ax.bar([x + width/2 for x in x_pos], actuals, width, 
-                      label='Actual', alpha=0.8, color='lightcoral')
-                
-                # Add error lines
-                for i, (pred, actual) in enumerate(zip(predictions, actuals)):
-                    ax.plot([i - width/2, i + width/2], [pred, actual], 'k-', alpha=0.5)
-                
-                ax.set_title(f'{model_name} - Prediction vs Actual (Horizon 1)', 
-                           fontsize=14, fontweight='bold')
-                ax.set_xlabel('Sample Index')
-                ax.set_ylabel('Return Value')
-                ax.legend()
-                ax.grid(True, alpha=0.3)
-                
-                # Add sample info as labels
-                sample_labels = [f"{row['symbol']}\n{str(row['date'])[:10]}" 
-                               for _, row in sample_data.iterrows()]
-                ax.set_xticks(x_pos)
-                ax.set_xticklabels(sample_labels, rotation=45, ha='right', fontsize=8)
+                if len(h1_data) > 0:
+                    # Sample data points
+                    sample_data = h1_data.sample(min(n_samples, len(h1_data)))
+                    
+                    x_pos = range(len(sample_data))
+                    predictions = sample_data['prediction'].values
+                    actuals = sample_data['actual'].values
+                    
+                    # Create bar plot comparison
+                    width = 0.35
+                    ax.bar([x - width/2 for x in x_pos], predictions, width, 
+                          label='Predictions', alpha=0.8, color='skyblue')
+                    ax.bar([x + width/2 for x in x_pos], actuals, width, 
+                          label='Actual', alpha=0.8, color='lightcoral')
+                    
+                    # Add error lines
+                    for i, (pred, actual) in enumerate(zip(predictions, actuals)):
+                        ax.plot([i - width/2, i + width/2], [pred, actual], 'k-', alpha=0.5)
+                    
+                    ax.set_title(f'{model_name} - Prediction vs Actual (Horizon 1)', 
+                               fontsize=14, fontweight='bold')
+                    ax.set_xlabel('Sample Index')
+                    ax.set_ylabel('Return Value')
+                    ax.legend()
+                    ax.grid(True, alpha=0.3)
+                    
+                    # Add sample info as labels
+                    sample_labels = []
+                    for _, row in sample_data.iterrows():
+                        # Handle missing date/symbol columns gracefully with multiple fallbacks
+                        try:
+                            symbol = row.get('symbol', 'unknown') if 'symbol' in row.index else 'unknown'
+                        except:
+                            symbol = 'unknown'
+                        
+                        try:
+                            date = row.get('date', 'N/A') if 'date' in row.index else 'N/A'
+                        except:
+                            date = 'N/A'
+                        
+                        # Format date string safely with multiple fallbacks
+                        try:
+                            if date != 'N/A' and date is not None:
+                                date_str = str(date)[:10]
+                            else:
+                                date_str = 'N/A'
+                        except:
+                            date_str = 'N/A'
+                        
+                        sample_labels.append(f"{symbol}\n{date_str}")
+                    
+                    ax.set_xticks(x_pos)
+                    ax.set_xticklabels(sample_labels, rotation=45, ha='right', fontsize=8)
+                else:
+                    ax.text(0.5, 0.5, f'{model_name}\n(No prediction data for any horizon)', 
+                           ha='center', va='center', transform=ax.transAxes, fontsize=12)
             else:
-                ax.text(0.5, 0.5, f'{model_name}\n(No prediction data)', 
+                ax.text(0.5, 0.5, f'{model_name}\n(Invalid prediction data structure)', 
                        ha='center', va='center', transform=ax.transAxes, fontsize=12)
         else:
             ax.text(0.5, 0.5, f'{model_name}\n(No detailed predictions)', 
@@ -287,14 +315,24 @@ def plot_error_distribution(all_evaluation_results: Dict[str, Dict], save_dir: s
             h1_data = df[df['horizon'] == 1]
             if len(h1_data) > 0:
                 errors = h1_data['absolute_error'].values
-                for error in errors:
-                    error_data.append({'Model': model_name, 'Absolute_Error': error})
+                # Filter out NaN values
+                valid_errors = errors[~np.isnan(errors)]
+                for error in valid_errors:
+                    if np.isfinite(error):  # Additional check for finite values
+                        error_data.append({'Model': model_name, 'Absolute_Error': error})
     
     if len(error_data) == 0:
-        print("⚠️ No error data available for distribution plots")
+        print("⚠️ No valid error data available for distribution plots")
         return
     
     error_df = pd.DataFrame(error_data)
+    
+    # Remove any remaining NaN values from the dataframe
+    error_df = error_df.dropna()
+    
+    if len(error_df) == 0:
+        print("⚠️ No finite error data available after filtering")
+        return
     
     # Create subplots
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
@@ -312,7 +350,10 @@ def plot_error_distribution(all_evaluation_results: Dict[str, Dict], save_dir: s
     # Histogram
     for model_name in error_df['Model'].unique():
         model_errors = error_df[error_df['Model'] == model_name]['Absolute_Error']
-        axes[1,0].hist(model_errors, alpha=0.6, label=model_name, bins=20)
+        # Filter out any remaining NaN/infinite values
+        valid_model_errors = model_errors[np.isfinite(model_errors)]
+        if len(valid_model_errors) > 0:
+            axes[1,0].hist(valid_model_errors, alpha=0.6, label=model_name, bins=20)
     axes[1,0].set_title('Error Histogram by Model', fontsize=14, fontweight='bold')
     axes[1,0].set_xlabel('Absolute Error')
     axes[1,0].set_ylabel('Frequency')
@@ -322,11 +363,17 @@ def plot_error_distribution(all_evaluation_results: Dict[str, Dict], save_dir: s
     stats_text = "Error Statistics:\n\n"
     for model_name in error_df['Model'].unique():
         model_errors = error_df[error_df['Model'] == model_name]['Absolute_Error']
-        stats_text += f"{model_name}:\n"
-        stats_text += f"  Mean: {model_errors.mean():.6f}\n"
-        stats_text += f"  Std:  {model_errors.std():.6f}\n"
-        stats_text += f"  Min:  {model_errors.min():.6f}\n"
-        stats_text += f"  Max:  {model_errors.max():.6f}\n\n"
+        # Filter out NaN/infinite values for statistics
+        valid_model_errors = model_errors[np.isfinite(model_errors)]
+        if len(valid_model_errors) > 0:
+            stats_text += f"{model_name}:\n"
+            stats_text += f"  Mean: {valid_model_errors.mean():.6f}\n"
+            stats_text += f"  Std:  {valid_model_errors.std():.6f}\n"
+            stats_text += f"  Min:  {valid_model_errors.min():.6f}\n"
+            stats_text += f"  Max:  {valid_model_errors.max():.6f}\n"
+            stats_text += f"  Count: {len(valid_model_errors)}\n\n"
+        else:
+            stats_text += f"{model_name}: No valid data\n\n"
     
     axes[1,1].text(0.05, 0.95, stats_text, transform=axes[1,1].transAxes, 
                    fontsize=10, verticalalignment='top', fontfamily='monospace')

@@ -12,8 +12,9 @@ import numpy as np
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
+from model.tft_model import setup_device
 
-def train_model(model, data_module, epochs=20, lr=0.001):
+def train_model(model, data_module, epochs=20, lr=0.001, device=None):
     """
     Simple training function for the model comparison pipeline.
     
@@ -22,11 +23,13 @@ def train_model(model, data_module, epochs=20, lr=0.001):
         data_module: The data module with train_loader and val_loader
         epochs: Number of training epochs
         lr: Learning rate
+        device: PyTorch device to use (if None, will auto-detect)
     
     Returns:
         Tuple of (trained_model, history)
     """
-    device = torch.device('mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu')
+    if device is None:
+        device = torch.device('mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     model.to(device)
     
@@ -90,7 +93,7 @@ def train_tft_model(model, data_module, news_data=None, epochs=10, lr=0.001, dev
         Trained model and training history
     """
     if device is None:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        device = setup_device()
     
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)

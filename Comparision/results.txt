@@ -18,3 +18,314 @@ TFT_with_news   0.000748   0.004599  0.002904  0.019989   0.055177  0.043311
  TFT_with_news     -0.046116           -0.24171               0.417047     -0.579574      -0.14562
 TFT_multimodal     -0.046116           -0.24171               0.417047     -0.579574      -0.14562
 (venv) (base) haysoncheung@Haysons-MacBook-Air TFT-b-nelson % 
+
+
+
+================================================================================
+🏆 FINAL MODEL COMPARISON RESULTS
+================================================================================
++------------------+---------------+--------------+--------------+--------------+--------------+--------------+
+| Model            | Final Capital | Sharpe Ratio | Max Drawdown | Win Rate (%) | Avg Gain (%) | Avg Loss (%) |
++------------------+---------------+--------------+--------------+--------------+--------------+--------------+
+| LSTM             |   $107,433.97 |       6.9663 |       -3.49% |        71.43 |         0.85 |        -1.30 |
+| GRU              |   $111,879.14 |      24.9571 |       -1.57% |        71.43 |         0.74 |        -0.54 |
+| Transformer      |   $109,634.02 |      17.2100 |       -1.33% |        76.19 |         0.70 |        -0.76 |
+| TFT_with_News    |   $111,027.32 |      17.2115 |       -1.74% |        66.67 |         0.79 |        -0.61 |
+| TFT_without_News |   $107,571.03 |      10.4004 |       -1.33% |        71.43 |         0.67 |        -0.84 |
+| Ridge            |   $108,572.82 |       4.2641 |       -6.79% |        52.38 |         1.83 |        -1.34 |
+| XGBoost          |   $108,572.82 |       4.2641 |       -6.79% |        52.38 |         1.83 |        -1.34 |
+| LightGBM         |   $108,572.82 |       4.2641 |       -6.79% |        52.38 |         1.83 |        -1.34 |
+| ARIMA            |   $100,000.00 |       0.0000 |        0.00% |         0.00 |         0.00 |         0.00 |
++------------------+---------------+--------------+--------------+--------------+--------------+--------------+
+
+
+Using target_0 column as actual returns for portfolio simulation
+✅ Completed 33 baseline experiments
+📊 Creating data impact analysis...
+✅ Data impact analysis saved to results/evaluation_20250807_055515/comprehensive_data_impact.png
+🔬 Creating ablation study heatmaps...
+✅ Ablation study heatmaps saved to results/evaluation_20250807_055515/detailed_ablation_study.png
+📈 Creating feature importance analysis...
+✅ Feature importance analysis saved to results/evaluation_20250807_055515/feature_importance_analysis.png
+🎯 Creating comprehensive model comparison...
+✅ Comprehensive comparison saved to results/evaluation_20250807_055515/comprehensive_model_comparison.png
+💾 Saving detailed results tables...
+✅ Detailed results saved to results/evaluation_20250807_055515/
+
+
+================================================================================
+📊 MULTI-HORIZON PREDICTION EVALUATION
+================================================================================
+====================================================================================================
+📊 MULTI-HORIZON PREDICTION EVALUATION - MEAN SQUARED ERROR (MSE)
+====================================================================================================
+Model                   H1_MSE      H5_MSE     H10_MSE     H15_MSE     H20_MSE     Avg_MSE
+-------------------------------------------------------------------------------------------
+LSTM_Full             0.000427    0.000831    0.001261    0.001695    0.002090    0.001261
+LSTM_No_News          0.000463    0.000865    0.001378    0.001894    0.002248    0.001370
+LSTM_Price_Only       0.000546    0.000959    0.001317    0.001913    0.002244    0.001396
+GRU_Full              0.000585    0.000831    0.001245    0.001724    0.002073    0.001292
+GRU_No_News           0.000531    0.000953    0.001373    0.001705    0.002230    0.001358
+Transformer_Full           nan         nan         nan         nan         nan         nan
+Transformer_No_News         nan         nan         nan         nan         nan         nan
+TFT_with_News         0.005169    0.000878    0.002362    0.002049    0.002537    0.002599
+TFT_without_News      0.000454    0.000885    0.001407    0.001793    0.002216    0.001351
+TFT_Price_Technical    0.000535    0.000846    0.001251    0.001716    0.003244    0.001518
+Ridge_Full            0.000982    0.001300    0.001613    0.001879    0.002164    0.001588
+Ridge_No_News         0.000985    0.001514    0.002082    0.002725    0.003302    0.002122
+Ridge_Price_Only      0.000448    0.000883    0.001356    0.001853    0.002315    0.001371
+Lasso_Full            0.000434    0.000862    0.001323    0.001815    0.002272    0.001341
+Lasso_No_News         0.000434    0.000862    0.001323    0.001815    0.002272    0.001341
+ElasticNet_Full       0.000434    0.000862    0.001323    0.001815    0.002272    0.001341
+RandomForest_Full     0.000466    0.000881    0.001317    0.001803    0.002273    0.001348
+RandomForest_No_News    0.000460    0.000873    0.001287    0.001763    0.002220    0.001321
+RandomForest_Technical    0.000502    0.000929    0.001396    0.001900    0.002373    0.001420
+XGBoost_Full          0.000515    0.000937    0.001359    0.001820    0.002299    0.001386
+XGBoost_No_News       0.000548    0.000923    0.001321    0.001760    0.002184    0.001347
+XGBoost_No_Economic    0.000561    0.000998    0.001404    0.001872    0.002351    0.001437
+LightGBM_Full         0.000558    0.000983    0.001415    0.001933    0.002405    0.001459
+LightGBM_No_News      0.000537    0.000970    0.001404    0.001897    0.002401    0.001442
+GradientBoosting_Full    0.000571    0.001004    0.001440    0.001913    0.002369    0.001459
+SVR_Full              0.000553    0.000938    0.001345    0.001794    0.002217    0.001369
+SVR_No_News           0.000595    0.001004    0.001437    0.001910    0.002347    0.001459
+MLP_Full              0.005481    0.006320    0.007354    0.008445    0.009454    0.007411
+MLP_No_News           0.011386    0.012241    0.012889    0.013747    0.014987    0.013050
+ARIMA                 0.010000    0.010000    0.010000    0.010000    0.010000    0.010000
+ARIMA_time_series_only    0.000434         N/A         N/A         N/A         N/A    0.000434
+Ridge_price_only      0.000437         N/A         N/A         N/A         N/A    0.000437
+Ridge_temporal_only    0.000435         N/A         N/A         N/A         N/A    0.000435
+Ridge_baseline        0.000433         N/A         N/A         N/A         N/A    0.000433
+Ridge_all_features    0.000433         N/A         N/A         N/A         N/A    0.000433
+Lasso_price_only      0.000434         N/A         N/A         N/A         N/A    0.000434
+Lasso_temporal_only    0.000434         N/A         N/A         N/A         N/A    0.000434
+Lasso_baseline        0.000434         N/A         N/A         N/A         N/A    0.000434
+Lasso_all_features    0.000434         N/A         N/A         N/A         N/A    0.000434
+ElasticNet_price_only    0.000434         N/A         N/A         N/A         N/A    0.000434
+ElasticNet_temporal_only    0.000434         N/A         N/A         N/A         N/A    0.000434
+ElasticNet_baseline    0.000434         N/A         N/A         N/A         N/A    0.000434
+ElasticNet_all_features    0.000434         N/A         N/A         N/A         N/A    0.000434
+Random Forest_price_only    0.000455         N/A         N/A         N/A         N/A    0.000455
+Random Forest_temporal_only    0.000551         N/A         N/A         N/A         N/A    0.000551
+Random Forest_baseline    0.000463         N/A         N/A         N/A         N/A    0.000463
+Random Forest_all_features    0.000460         N/A         N/A         N/A         N/A    0.000460
+XGBoost_price_only    0.000480         N/A         N/A         N/A         N/A    0.000480
+XGBoost_temporal_only    0.000555         N/A         N/A         N/A         N/A    0.000555
+XGBoost_baseline      0.000575         N/A         N/A         N/A         N/A    0.000575
+XGBoost_all_features    0.000605         N/A         N/A         N/A         N/A    0.000605
+LightGBM_price_only    0.000531         N/A         N/A         N/A         N/A    0.000531
+LightGBM_temporal_only    0.000560         N/A         N/A         N/A         N/A    0.000560
+LightGBM_baseline     0.000537         N/A         N/A         N/A         N/A    0.000537
+LightGBM_all_features    0.000534         N/A         N/A         N/A         N/A    0.000534
+SVR_price_only        0.000734         N/A         N/A         N/A         N/A    0.000734
+SVR_temporal_only     0.000961         N/A         N/A         N/A         N/A    0.000961
+SVR_baseline          0.000500         N/A         N/A         N/A         N/A    0.000500
+SVR_all_features      0.000500         N/A         N/A         N/A         N/A    0.000500
+MLP_price_only        0.000568         N/A         N/A         N/A         N/A    0.000568
+MLP_temporal_only     0.001478         N/A         N/A         N/A         N/A    0.001478
+MLP_baseline          0.053352         N/A         N/A         N/A         N/A    0.053352
+MLP_all_features      0.046437         N/A         N/A         N/A         N/A    0.046437
+
+====================================================================================================
+📊 MULTI-HORIZON PREDICTION EVALUATION - MEAN ABSOLUTE ERROR (MAE)
+====================================================================================================
+Model                   H1_MAE      H5_MAE     H10_MAE     H15_MAE     H20_MAE     Avg_MAE
+-------------------------------------------------------------------------------------------
+LSTM_Full             0.014134    0.020222    0.025447    0.030255    0.033560    0.024723
+LSTM_No_News          0.015035    0.021173    0.027655    0.032808    0.035163    0.026367
+LSTM_Price_Only       0.017493    0.023303    0.026725    0.032905    0.035865    0.027258
+GRU_Full              0.018400    0.020139    0.025106    0.030639    0.033305    0.025518
+GRU_No_News           0.016932    0.023035    0.027567    0.030393    0.034971    0.026580
+Transformer_Full           nan         nan         nan         nan         nan         nan
+Transformer_No_News         nan         nan         nan         nan         nan         nan
+TFT_with_News         0.068873    0.021447    0.040105    0.034515    0.037834    0.040555
+TFT_without_News      0.015107    0.021551    0.028071    0.031444    0.034698    0.026174
+TFT_Price_Technical    0.017173    0.020645    0.025311    0.031167    0.044729    0.027805
+Ridge_Full            0.025569    0.027698    0.030870    0.032396    0.034076    0.030122
+Ridge_No_News         0.025778    0.031624    0.036847    0.042129    0.045805    0.036436
+Ridge_Price_Only      0.014809    0.021740    0.027495    0.032602    0.036318    0.026593
+Lasso_Full            0.014267    0.021112    0.026713    0.031842    0.035400    0.025867
+Lasso_No_News         0.014267    0.021112    0.026713    0.031842    0.035400    0.025867
+ElasticNet_Full       0.014267    0.021112    0.026713    0.031842    0.035400    0.025867
+RandomForest_Full     0.015136    0.021297    0.026724    0.031754    0.035512    0.026085
+RandomForest_No_News    0.015036    0.020856    0.026294    0.031201    0.034824    0.025642
+RandomForest_Technical    0.015719    0.022742    0.028238    0.033162    0.036719    0.027316
+XGBoost_Full          0.016115    0.021376    0.026941    0.031536    0.035566    0.026307
+XGBoost_No_News       0.016459    0.021068    0.026108    0.030489    0.034184    0.025662
+XGBoost_No_Economic    0.017003    0.022892    0.027796    0.032665    0.036147    0.027300
+LightGBM_Full         0.017123    0.022675    0.027851    0.032956    0.036577    0.027436
+LightGBM_No_News      0.016506    0.022419    0.027852    0.032974    0.036388    0.027228
+GradientBoosting_Full    0.016866    0.021965    0.027683    0.031834    0.035539    0.026778
+SVR_Full              0.018075    0.022749    0.027088    0.031831    0.035293    0.027007
+SVR_No_News           0.018722    0.023887    0.028479    0.033415    0.036916    0.028284
+MLP_Full              0.061298    0.065567    0.070505    0.075626    0.079096    0.070418
+MLP_No_News           0.086788    0.089990    0.091108    0.093229    0.096936    0.091610
+ARIMA                 0.100000    0.100000    0.100000    0.100000    0.100000    0.100000
+ARIMA_time_series_only    0.014225         N/A         N/A         N/A         N/A    0.014225
+Ridge_price_only      0.014369         N/A         N/A         N/A         N/A    0.014369
+Ridge_temporal_only    0.014476         N/A         N/A         N/A         N/A    0.014476
+Ridge_baseline        0.014321         N/A         N/A         N/A         N/A    0.014321
+Ridge_all_features    0.014321         N/A         N/A         N/A         N/A    0.014321
+Lasso_price_only      0.014267         N/A         N/A         N/A         N/A    0.014267
+Lasso_temporal_only    0.014267         N/A         N/A         N/A         N/A    0.014267
+Lasso_baseline        0.014267         N/A         N/A         N/A         N/A    0.014267
+Lasso_all_features    0.014267         N/A         N/A         N/A         N/A    0.014267
+ElasticNet_price_only    0.014267         N/A         N/A         N/A         N/A    0.014267
+ElasticNet_temporal_only    0.014267         N/A         N/A         N/A         N/A    0.014267
+ElasticNet_baseline    0.014267         N/A         N/A         N/A         N/A    0.014267
+ElasticNet_all_features    0.014267         N/A         N/A         N/A         N/A    0.014267
+Random Forest_price_only    0.015010         N/A         N/A         N/A         N/A    0.015010
+Random Forest_temporal_only    0.018140         N/A         N/A         N/A         N/A    0.018140
+Random Forest_baseline    0.015114         N/A         N/A         N/A         N/A    0.015114
+Random Forest_all_features    0.015020         N/A         N/A         N/A         N/A    0.015020
+XGBoost_price_only    0.015317         N/A         N/A         N/A         N/A    0.015317
+XGBoost_temporal_only    0.018254         N/A         N/A         N/A         N/A    0.018254
+XGBoost_baseline      0.017034         N/A         N/A         N/A         N/A    0.017034
+XGBoost_all_features    0.017588         N/A         N/A         N/A         N/A    0.017588
+LightGBM_price_only    0.016121         N/A         N/A         N/A         N/A    0.016121
+LightGBM_temporal_only    0.018369         N/A         N/A         N/A         N/A    0.018369
+LightGBM_baseline     0.016595         N/A         N/A         N/A         N/A    0.016595
+LightGBM_all_features    0.016597         N/A         N/A         N/A         N/A    0.016597
+SVR_price_only        0.020985         N/A         N/A         N/A         N/A    0.020985
+SVR_temporal_only     0.025228         N/A         N/A         N/A         N/A    0.025228
+SVR_baseline          0.016407         N/A         N/A         N/A         N/A    0.016407
+SVR_all_features      0.016407         N/A         N/A         N/A         N/A    0.016407
+MLP_price_only        0.017258         N/A         N/A         N/A         N/A    0.017258
+MLP_temporal_only     0.030722         N/A         N/A         N/A         N/A    0.030722
+MLP_baseline          0.179432         N/A         N/A         N/A         N/A    0.179432
+MLP_all_features      0.144105         N/A         N/A         N/A         N/A    0.144105
+
+
+
+================================================================================
+🏆 FINAL MODEL COMPARISON RESULTS
+================================================================================
++-----------------------------+---------------+--------------+--------------+--------------+--------------+--------------+
+| Model                       | Final Capital | Sharpe Ratio | Max Drawdown | Win Rate (%) | Avg Gain (%) | Avg Loss (%) |
++-----------------------------+---------------+--------------+--------------+--------------+--------------+--------------+
+| LSTM_Full                   |   $111,583.29 |      14.2609 |       -2.89% |        72.73 |         0.85 |        -1.08 |
+| LSTM_No_News                |   $111,583.29 |      14.2609 |       -2.89% |        72.73 |         0.85 |        -1.08 |
+| LSTM_Price_Only             |   $109,319.08 |       9.5183 |       -2.96% |        72.73 |         0.85 |        -1.12 |
+| GRU_Full                    |   $111,958.38 |      23.6659 |       -1.57% |        72.73 |         0.70 |        -0.54 |
+| GRU_No_News                 |   $111,583.29 |      14.2609 |       -2.89% |        72.73 |         0.85 |        -1.08 |
+| Transformer_Full            |   $111,958.38 |      23.6659 |       -1.57% |        72.73 |         0.70 |        -0.54 |
+| Transformer_No_News         |   $111,958.38 |      23.6659 |       -1.57% |        72.73 |         0.70 |        -0.54 |
+| TFT_with_News               |   $106,127.95 |       5.2942 |       -2.48% |        59.09 |         0.94 |        -0.89 |
+| TFT_without_News            |   $110,378.45 |      11.4371 |       -2.89% |        68.18 |         0.93 |        -1.15 |
+| TFT_Price_Technical         |   $109,856.12 |      10.6121 |       -2.50% |        72.73 |         0.96 |        -1.22 |
+| Ridge_Full                  |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| Ridge_No_News               |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| Ridge_Price_Only            |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| Lasso_Full                  |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| Lasso_No_News               |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| ElasticNet_Full             |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| RandomForest_Full           |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| RandomForest_No_News        |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| RandomForest_Technical      |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| XGBoost_Full                |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| XGBoost_No_News             |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| XGBoost_No_Economic         |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| LightGBM_Full               |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| LightGBM_No_News            |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| GradientBoosting_Full       |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| SVR_Full                    |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| SVR_No_News                 |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| MLP_Full                    |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| MLP_No_News                 |   $114,492.66 |      13.3079 |       -2.54% |        68.18 |         1.38 |        -1.03 |
+| ARIMA                       |   $100,000.00 |       0.0000 |        0.00% |         0.00 |         0.00 |         0.00 |
+| ARIMA_time_series_only      |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Ridge_price_only            |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Ridge_temporal_only         |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Ridge_baseline              |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Ridge_all_features          |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Lasso_price_only            |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Lasso_temporal_only         |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Lasso_baseline              |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Lasso_all_features          |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| ElasticNet_price_only       |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| ElasticNet_temporal_only    |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| ElasticNet_baseline         |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| ElasticNet_all_features     |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Random Forest_price_only    |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Random Forest_temporal_only |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Random Forest_baseline      |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| Random Forest_all_features  |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| XGBoost_price_only          |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| XGBoost_temporal_only       |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| XGBoost_baseline            |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| XGBoost_all_features        |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| LightGBM_price_only         |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| LightGBM_temporal_only      |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| LightGBM_baseline           |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| LightGBM_all_features       |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| SVR_price_only              |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| SVR_temporal_only           |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| SVR_baseline                |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| SVR_all_features            |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| MLP_price_only              |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| MLP_temporal_only           |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| MLP_baseline                |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
+| MLP_all_features            |   $106,084.36 |       6.8390 |       -2.31% |        63.64 |         0.77 |        -0.59 |
++-----------------------------+---------------+--------------+--------------+--------------+--------------+--------------+
+
+
+================================================================================
+📈 GENERATING COMPREHENSIVE VISUALIZATIONS AND SAVING ARTIFACTS
+================================================================================
+
+🎨 Creating comprehensive plots in results/evaluation_20250807_055515...
+📈 Plotting training curves...
+✅ Training curves saved to results/evaluation_20250807_055515/training_curves.png
+📊 Creating prediction analysis plots...
+   Creating analysis for AAPL...
+   Creating analysis for AMD...
+   Creating analysis for GOOGL...
+   Creating analysis for INTC...
+   Creating analysis for MSFT...
+   Creating analysis for NVDA...
+   Creating analysis for QCOM...
+   Creating analysis for TSLA...
+   Creating analysis for unknown...
+✅ Prediction analysis plots saved to results/evaluation_20250807_055515/
+🔬 Creating ablation study plots...
+   Creating ablation study for AMD...
+   Creating ablation study for INTC...
+   Creating ablation study for TSLA...
+✅ Ablation study plots saved to results/evaluation_20250807_055515/
+🔥 Creating horizon comparison heatmaps...
+✅ Horizon heatmaps saved to results/evaluation_20250807_055515/horizon_heatmaps.png
+✅ All comprehensive plots created successfully in results/evaluation_20250807_055515
+📈 Plotting training curves...
+✅ Training curves saved to results/evaluation_20250807_055515/training_curves.png
+📊 Plotting prediction samples...
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/dist-packages/pandas/core/indexes/base.py", line 3805, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "index.pyx", line 167, in pandas._libs.index.IndexEngine.get_loc
+  File "index.pyx", line 196, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas/_libs/hashtable_class_helper.pxi", line 7081, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas/_libs/hashtable_class_helper.pxi", line 7089, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'date'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/content/drive/MyDrive/programs/TFT/run_all_models.py", line 1027, in <module>
+    run_pipeline()
+  File "/content/drive/MyDrive/programs/TFT/run_all_models.py", line 1004, in run_pipeline
+    plot_prediction_samples(all_evaluation_results, results_dir)
+  File "/content/drive/MyDrive/programs/TFT/plotting.py", line 186, in plot_prediction_samples
+    sample_labels = [f"{row['symbol']}\n{str(row['date'])[:10]}" 
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/drive/MyDrive/programs/TFT/plotting.py", line 186, in <listcomp>
+    sample_labels = [f"{row['symbol']}\n{str(row['date'])[:10]}" 
+                                             ~~~^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/pandas/core/series.py", line 1121, in __getitem__
+    return self._get_value(key)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/pandas/core/series.py", line 1237, in _get_value
+    loc = self.index.get_loc(label)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/pandas/core/indexes/base.py", line 3812, in get_loc
+    raise KeyError(key) from err
+KeyError: 'date'
