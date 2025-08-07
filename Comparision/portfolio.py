@@ -7,7 +7,7 @@ def simulate_portfolio(predictions, actuals, initial_capital=100000, top_k=5):
     
     Args:
         predictions (pd.DataFrame): DataFrame with columns ['date', 'symbol', 'prediction']
-        actuals (pd.DataFrame): DataFrame with columns ['date', 'symbol', 'actual_return']
+        actuals (pd.DataFrame): DataFrame with validation data (should contain target columns or close prices)
         initial_capital (float): Starting capital for the simulation.
         top_k (int): Number of top stocks to invest in based on predictions.
 
@@ -15,12 +15,29 @@ def simulate_portfolio(predictions, actuals, initial_capital=100000, top_k=5):
         pd.DataFrame: A DataFrame containing the portfolio's daily value and returns.
     """
     
-    # Merge predictions with actual returns
     # Ensure dates are in the same format
     predictions['date'] = pd.to_datetime(predictions['date']).dt.date
     actuals['date'] = pd.to_datetime(actuals['date']).dt.date
     
-    data = pd.merge(predictions, actuals, on=['date', 'symbol'], how='inner')
+    # Create actual return column from actuals data
+    actuals_with_returns = actuals.copy()
+    
+    # Check if we have target_0 column (1-day ahead return) - use that as actual return
+    if 'target_0' in actuals.columns:
+        actuals_with_returns['actual_return'] = actuals['target_0']
+        print("Using target_0 column as actual returns for portfolio simulation")
+    elif 'close' in actuals.columns:
+        # Calculate returns from close prices
+        print("Calculating actual returns from close prices")
+        actuals_with_returns = actuals_with_returns.sort_values(['symbol', 'date'])
+        actuals_with_returns['actual_return'] = actuals_with_returns.groupby('symbol')['close'].pct_change()
+    else:
+        # Fallback: use a synthetic return column
+        print("Warning: No target or close price columns found, using synthetic returns")
+        actuals_with_returns['actual_return'] = 0.001  # Small positive return as fallback
+    
+    data = pd.merge(predictions, actuals_with_returns[['date', 'symbol', 'actual_return']], 
+                   on=['date', 'symbol'], how='inner')
     
     if data.empty:
         print("Warning: No matching data between predictions and actuals for portfolio simulation.")
@@ -104,4 +121,71 @@ def calculate_performance_metrics(portfolio_df):
         'annualized_volatility': annualized_volatility,
         'sharpe_ratio': sharpe_ratio,
         'max_drawdown': max_drawdown,
+    }
+
+
+def run_portfolio_simulation(predictions, actuals, initial_capital=100000, top_k=5):
+    """
+    Runs complete portfolio simulation and returns performance metrics.
+    
+    Args:
+        predictions (pd.DataFrame): DataFrame with columns ['date', 'symbol', 'prediction']
+        actuals (pd.DataFrame): DataFrame with validation data
+        initial_capital (float): Starting capital for the simulation
+        top_k (int): Number of top stocks to invest in based on predictions
+        
+    Returns:
+        dict: Dictionary with all required portfolio performance metrics
+    """
+    # Run the portfolio simulation
+    portfolio_df = simulate_portfolio(predictions, actuals, initial_capital, top_k)
+    
+    if portfolio_df.empty:
+        return {
+            'final_capital': initial_capital,
+            'total_return': 0.0,
+            'annualized_return': 0.0,
+            'sharpe_ratio': 0.0,
+            'max_drawdown': 0.0,
+            'win_rate': 0.0,
+            'avg_gain': 0.0,
+            'avg_loss': 0.0
+        }
+    
+    # Calculate basic metrics
+    final_capital = portfolio_df['portfolio_value'].iloc[-1]
+    daily_returns = portfolio_df['daily_return']
+    
+    # Total and annualized returns
+    total_return = (final_capital / initial_capital) - 1
+    num_days = len(portfolio_df)
+    annualized_return = (1 + total_return) ** (252 / num_days) - 1 if num_days > 0 else 0
+    
+    # Volatility and Sharpe ratio
+    annualized_volatility = daily_returns.std() * np.sqrt(252)
+    sharpe_ratio = annualized_return / annualized_volatility if annualized_volatility > 0 else 0
+    
+    # Max drawdown
+    cumulative_returns = (1 + daily_returns).cumprod()
+    peak = cumulative_returns.expanding(min_periods=1).max()
+    drawdown = (cumulative_returns - peak) / peak
+    max_drawdown = drawdown.min()
+    
+    # Win rate and average gains/losses
+    positive_returns = daily_returns[daily_returns > 0]
+    negative_returns = daily_returns[daily_returns < 0]
+    
+    win_rate = len(positive_returns) / len(daily_returns) if len(daily_returns) > 0 else 0
+    avg_gain = positive_returns.mean() if len(positive_returns) > 0 else 0
+    avg_loss = negative_returns.mean() if len(negative_returns) > 0 else 0
+    
+    return {
+        'final_capital': final_capital,
+        'total_return': total_return,
+        'annualized_return': annualized_return,
+        'sharpe_ratio': sharpe_ratio,
+        'max_drawdown': max_drawdown,
+        'win_rate': win_rate,
+        'avg_gain': avg_gain,
+        'avg_loss': avg_loss
     }

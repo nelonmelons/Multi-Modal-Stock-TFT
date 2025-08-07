@@ -389,13 +389,14 @@ def evaluate_model(model, data_module, device, horizons, feature_indices, featur
         
     return results, predictions_df
 
-def get_predictions(model, dataloader):
+def get_predictions(model, dataloader, val_df=None):
     """
     Generate predictions for a given model and dataloader.
 
     Args:
         model (nn.Module): The trained PyTorch model.
         dataloader (DataLoader): The dataloader for which to generate predictions.
+        val_df (pd.DataFrame): Validation DataFrame with date/symbol information.
 
     Returns:
         pd.DataFrame: A DataFrame containing dates, symbols, and predictions.
@@ -420,39 +421,62 @@ def get_predictions(model, dataloader):
             # Store predictions
             predictions.extend(output.cpu().numpy())
 
-    # Create a predictions DataFrame with more realistic data
+    # Create a predictions DataFrame using actual validation data if available
     num_predictions = len(predictions)
     
-    # Convert predictions to list format for portfolio simulation
-    if isinstance(predictions[0], np.ndarray):
-        # Multi-step predictions
-        predictions_list = [pred.tolist() if hasattr(pred, 'tolist') else pred for pred in predictions]
+    if val_df is not None and len(val_df) >= num_predictions:
+        # Use actual validation data structure
+        prediction_rows = []
+        
+        for i in range(num_predictions):
+            # Handle different prediction formats
+            pred = predictions[i]
+            if isinstance(pred, np.ndarray):
+                # Multi-step predictions - use the first step for portfolio decisions
+                pred_value = float(pred[0]) if len(pred) > 0 else 0.0
+            else:
+                # Single prediction value
+                pred_value = float(pred)
+            
+            # Use actual date/symbol from validation data
+            prediction_rows.append({
+                'date': val_df.iloc[i]['date'],
+                'symbol': val_df.iloc[i]['symbol'],
+                'prediction': pred_value  # Single numeric value for portfolio simulation
+            })
+        
+        return pd.DataFrame(prediction_rows)
+    
     else:
-        # Single-step predictions - convert to multi-step format
-        predictions_list = [[pred] * 10 for pred in predictions]  # Assume 10-step horizon
-    
-    predictions_df = pd.DataFrame({
-        'prediction': predictions_list
-    })
-    
-    # Create more realistic date and symbol information
-    # Use recent dates and cycle through common symbols
-    symbols = ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'NVDA', 'AMD', 'QCOM', 'INTC']
-    start_date = pd.Timestamp('2024-08-01')  # Use recent date
-    
-    dates = []
-    symbols_list = []
-    
-    for i in range(num_predictions):
-        # Add business days (skip weekends)
-        date = start_date + pd.Timedelta(days=i)
-        # Skip weekends
-        while date.weekday() >= 5:  # 5=Saturday, 6=Sunday
-            date += pd.Timedelta(days=1)
-        dates.append(date)
-        symbols_list.append(symbols[i % len(symbols)])
-    
-    predictions_df['date'] = dates
-    predictions_df['symbol'] = symbols_list
-    
-    return predictions_df[['date', 'symbol', 'prediction']]
+        # Fallback to synthetic data if val_df not available or insufficient
+        print(f"Warning: Using synthetic data for predictions. val_df available: {val_df is not None}, len: {len(val_df) if val_df is not None else 'N/A'}, predictions: {num_predictions}")
+        
+        prediction_rows = []
+        symbols = ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'NVDA', 'AMD', 'QCOM', 'INTC']
+        start_date = pd.Timestamp('2024-08-01')  # Use recent date
+        
+        for i in range(num_predictions):
+            # Add business days (skip weekends)
+            date = start_date + pd.Timedelta(days=i)
+            # Skip weekends
+            while date.weekday() >= 5:  # 5=Saturday, 6=Sunday
+                date += pd.Timedelta(days=1)
+            
+            symbol = symbols[i % len(symbols)]
+            
+            # Handle different prediction formats
+            pred = predictions[i]
+            if isinstance(pred, np.ndarray):
+                # Multi-step predictions - use the first step for portfolio decisions
+                pred_value = float(pred[0]) if len(pred) > 0 else 0.0
+            else:
+                # Single prediction value
+                pred_value = float(pred)
+            
+            prediction_rows.append({
+                'date': date,
+                'symbol': symbol,
+                'prediction': pred_value  # Single numeric value for portfolio simulation
+            })
+        
+        return pd.DataFrame(prediction_rows)
