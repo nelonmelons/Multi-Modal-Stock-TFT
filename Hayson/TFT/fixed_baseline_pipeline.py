@@ -8,7 +8,7 @@ for fair comparison. Includes news embeddings, economic indicators, technical an
 and corporate events data.
 
 Models Included:
-- Traditional ML: Linear Regression, Random Forest
+- Traditional ML: Ridge Regression (L2 regularized), Random Forest
 - Ensemble Methods: XGBoost
 
 Features:
@@ -76,8 +76,8 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Any, Optional
 from pathlib import Path
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
+from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, accuracy_score, balanced_accuracy_score, f1_score, roc_auc_score
 
@@ -112,9 +112,7 @@ try:
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
-    print("⚠️ XGBoost not available. Install with: pip install xgboost")
-
-# Import TFT data interface for multimodal data
+    print("⚠️ XGBoost not available. Install with: pip install xgboost")# Import TFT data interface for multimodal data
 from dataModule.interface import get_data_loader_with_module
 
 # Feature ablation modes for ablation study
@@ -178,7 +176,72 @@ class MultimodalStockPredictor:
     
     def __init__(self, sequence_length: int = 30):
         self.sequence_length = sequence_length
-        self.feature_scaler = StandardScaler()
+        self.feature_scaler = RobustScaler(quantile_range=(25.0, 75.0))
+        
+    def process_targets_safely(self, targets):
+        """
+        Process and clean target returns to prevent numerical instability.
+        
+        Args:
+            targets: Raw target returns array
+            
+        Returns:
+            targets_cleaned: Processed targets with outliers clipped
+        """
+        # Handle NaN/Inf values first
+        targets_cleaned = np.nan_to_num(targets, nan=0.0, posinf=0.5, neginf=-0.5)
+        
+        # Clip extreme returns to prevent model instability
+        # Most realistic daily returns are within ±50%
+        targets_cleaned = np.clip(targets_cleaned, -0.5, 0.5)
+        
+        # Additional outlier detection using IQR method
+        if len(targets_cleaned) > 10:  # Need enough data for percentiles
+            Q1 = np.percentile(targets_cleaned, 25)
+            Q3 = np.percentile(targets_cleaned, 75)
+            IQR = Q3 - Q1
+            
+            if IQR > 0:  # Avoid division by zero
+                # More conservative bounds for financial returns
+                lower_bound = Q1 - 2.5 * IQR  # 2.5 instead of 1.5 for conservative clipping
+                upper_bound = Q3 + 2.5 * IQR
+                
+                # Ensure bounds are reasonable for daily returns
+                lower_bound = max(lower_bound, -0.5)  # No worse than -50%
+                upper_bound = min(upper_bound, 0.5)   # No better than +50%
+                
+                targets_cleaned = np.clip(targets_cleaned, lower_bound, upper_bound)
+        
+        return targets_cleaned
+    
+    def validate_model_predictions(self, y_pred, model_name):
+        """
+        Validate and clean model predictions to prevent numerical errors.
+        
+        Args:
+            y_pred: Model predictions
+            model_name: Name of the model for logging
+            
+        Returns:
+            y_pred_cleaned: Validated predictions
+        """
+        # Check for NaN/Inf values
+        nan_count = np.sum(np.isnan(y_pred))
+        inf_count = np.sum(np.isinf(y_pred))
+        
+        if nan_count > 0 or inf_count > 0:
+            print(f"   ⚠️ {model_name} produced {nan_count} NaN and {inf_count} Inf predictions")
+            y_pred = np.nan_to_num(y_pred, nan=0.0, posinf=0.2, neginf=-0.2)
+        
+        # Clip extreme predictions that could cause downstream issues
+        y_pred_clipped = np.clip(y_pred, -1.0, 1.0)  # ±100% max daily return prediction
+        
+        # Check if clipping was significant
+        clipped_count = np.sum(np.abs(y_pred) > 1.0)
+        if clipped_count > 0:
+            print(f"   📐 {model_name}: Clipped {clipped_count}/{len(y_pred)} extreme predictions")
+        
+        return y_pred_clipped
         
     def extract_features_from_datamodule(self, datamodule, feature_mode: str = 'full', predict_len: int = 5) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -212,18 +275,22 @@ class MultimodalStockPredictor:
         # Define feature groups based on common naming patterns
         ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
         
-        # Technical indicators - common patterns
-        technical_patterns = ['sma', 'ema', 'rsi', 'macd', 'bb_', 'bollinger', 'atr', 'stoch', 'williams', 'adx', 'cci', 'momentum', 'roc']
+        # Technical indicators - expanded patterns to catch more variations
+        technical_patterns = ['sma', 'ema', 'rsi', 'macd', 'bb_', 'bollinger', 'atr', 'stoch', 'williams', 'adx', 'cci', 'momentum', 'roc', 
+                             'ta_', 'technical', 'indicator', 'moving_avg', 'ma_', 'std_', 'vol_', 'volatility', 'return_lag', 'lag_']
         
-        # News/sentiment features - common patterns  
-        news_patterns = ['news', 'sentiment', 'embed', 'nlp', 'text', 'headline', 'article']
+        # News/sentiment features - expanded patterns  
+        news_patterns = ['news', 'sentiment', 'embed', 'emb_', 'nlp', 'text', 'headline', 'article', 'bert', 'compound', 'negative', 'neutral', 'positive']
         
-        # Economic indicators - FRED data patterns
-        economic_patterns = ['fred', 'gdp', 'inflation', 'unemployment', 'interest', 'cpi', 'ppi', 'ism', 'nfp', 'retail', 'housing']
+        # Economic indicators - expanded FRED data patterns
+        economic_patterns = ['fred', 'gdp', 'inflation', 'unemployment', 'interest', 'cpi', 'ppi', 'ism', 'nfp', 'retail', 'housing',
+                           'economic', 'macro', 'fed', 'rate', 'yield', 'bond', 'treasury']
         
         # Categorize all available features
         feature_cols = []
         all_numeric_cols = []
+        
+        print(f"   🔍 Analyzing {len(feature_df.columns)} total columns...")
         
         for col in feature_df.columns:
             if col not in excluded_cols:
@@ -236,15 +303,29 @@ class MultimodalStockPredictor:
                     print(f"   ⚠️ Excluding non-numeric column: {col}")
                     continue
         
+        print(f"   📊 Found {len(all_numeric_cols)} numeric columns")
+        
+        # Categorize features by type for debugging
+        ohlcv_features = [col for col in ohlcv_cols if col in all_numeric_cols]
+        technical_features = [col for col in all_numeric_cols 
+                             if any(pattern in col.lower() for pattern in technical_patterns)]
+        news_features = [col for col in all_numeric_cols 
+                        if any(pattern in col.lower() for pattern in news_patterns)]
+        economic_features = [col for col in all_numeric_cols 
+                           if any(pattern in col.lower() for pattern in economic_patterns)]
+        
+        print(f"   📈 OHLCV features: {len(ohlcv_features)} - {ohlcv_features}")
+        print(f"   📊 Technical features: {len(technical_features)} - {technical_features[:5]}{'...' if len(technical_features) > 5 else ''}")
+        print(f"   📰 News features: {len(news_features)} - {news_features[:5]}{'...' if len(news_features) > 5 else ''}")
+        print(f"   🏛️ Economic features: {len(economic_features)} - {economic_features[:5]}{'...' if len(economic_features) > 5 else ''}")
+        
         # Apply feature mode filtering
         if feature_mode == 'ohlcv_only':
-            feature_cols = [col for col in ohlcv_cols if col in all_numeric_cols]
+            feature_cols = ohlcv_features
             
         elif feature_mode == 'core':
             # OHLCV + Technical indicators
-            feature_cols = [col for col in ohlcv_cols if col in all_numeric_cols]
-            feature_cols.extend([col for col in all_numeric_cols 
-                               if any(pattern in col.lower() for pattern in technical_patterns)])
+            feature_cols = ohlcv_features + technical_features
             
         elif feature_mode == 'no_news':
             # All except news features
@@ -269,6 +350,13 @@ class MultimodalStockPredictor:
         feature_cols = sorted(list(set(feature_cols)))
         
         print(f"   ✅ Selected {len(feature_cols)} features for mode '{feature_mode}'")
+        
+        # Validate that we have features
+        if len(feature_cols) == 0:
+            print(f"   ❌ ERROR: No features selected for mode '{feature_mode}'!")
+            print(f"   Available feature types: OHLCV={len(ohlcv_features)}, Technical={len(technical_features)}, News={len(news_features)}, Economic={len(economic_features)}")
+            raise ValueError(f"No features available for feature mode '{feature_mode}'")
+        
         if len(feature_cols) < 20:  # Only print if not too many
             print(f"   📋 Features: {feature_cols}")
         
@@ -287,96 +375,41 @@ class MultimodalStockPredictor:
             targets = symbol_df['target'].values
             timestamps = symbol_df['date'].values
             
-            # Handle missing values
-            features = np.nan_to_num(features, nan=0.0, posinf=1e10, neginf=-1e10)
-            targets = np.nan_to_num(targets, nan=0.0, posinf=1e10, neginf=-1e10)
-            
-            # 🔍 DEBUG: Check target calculation and data integrity
-            print(f"\n🔍 DEBUGGING {symbol}:")
-            print(f"   Target column statistics:")
-            print(f"     Mean: {symbol_df['target'].mean():.6f}")
-            print(f"     Std: {symbol_df['target'].std():.6f}")
-            print(f"     Min: {symbol_df['target'].min():.6f}")
-            print(f"     Max: {symbol_df['target'].max():.6f}")
-            
-            # 🔍 DEBUG: Additional analysis for systematic bias investigation
-            print(f"\n🔍 DEEPER DEBUGGING for {symbol}:")
-            
-            # Check target distribution properties
-            all_targets_flat = targets.flatten()
-            print(f"   Target distribution analysis:")
-            print(f"     Total targets: {len(all_targets_flat)}")
-            print(f"     Mean: {np.mean(all_targets_flat):.6f}")
-            print(f"     Std: {np.std(all_targets_flat):.6f}")
-            print(f"     Skewness: {np.mean(((all_targets_flat - np.mean(all_targets_flat)) / np.std(all_targets_flat))**3):.6f}")
-            print(f"     Min: {np.min(all_targets_flat):.6f}, Max: {np.max(all_targets_flat):.6f}")
-            
-            # Check for systematic patterns in features vs targets
-            feature_means = np.mean(features, axis=1)  # Mean feature value per time step
-            print(f"   Feature-target correlation check:")
-            if len(feature_means) == len(targets):
-                corr_feat_targ = np.corrcoef(feature_means, targets)[0,1]
-                print(f"     Correlation between feature means and targets: {corr_feat_targ:.6f}")
-                if abs(corr_feat_targ) > 0.3:
-                    print(f"     ⚠️  HIGH FEATURE-TARGET CORRELATION DETECTED!")
-            else:
-                print(f"     Feature-target shapes don't match: {len(feature_means)} vs {len(targets)}")
-            
-            # Check target autocorrelation
-            if len(targets) > 1:
-                target_autocorr = np.corrcoef(targets[:-1], targets[1:])[0,1] if len(targets) > 1 else 0
-                print(f"     Target autocorrelation (lag-1): {target_autocorr:.6f}")
-            
-            # Check if target is properly centered around zero
-            print(f"   Target centering check:")
-            print(f"     Should be close to 0 for random walk: {np.mean(targets):.6f}")
-            
-            # Check target statistics at different time positions
-            print(f"   Target statistics by position in sequence:")
-            targets_reshaped = targets.reshape(-1, 1) if len(targets.shape) == 1 else targets
-            for pos in range(min(3, len(targets))):
-                pos_mean = np.mean(targets_reshaped[pos::predict_len] if predict_len > 1 else [targets[pos]])
-                print(f"     Position {pos}: mean = {pos_mean:.6f}")
-
-            # Check if target is returns or something else
+            # CRITICAL FIX: Calculate proper forward-looking returns if close prices are available
             if 'close' in symbol_df.columns:
-                closes = symbol_df['close'].values
-                manual_returns = np.diff(closes) / closes[:-1]  # (close[t] - close[t-1]) / close[t-1]
-                stored_targets = symbol_df['target'].values[1:]  # Align with manual returns
+                close_prices = symbol_df['close'].values
                 
-                print(f"   Manual returns mean: {manual_returns.mean():.6f}")
-                print(f"   Stored targets mean: {stored_targets.mean():.6f}")
-                print(f"   Correlation: {np.corrcoef(manual_returns[:min(len(manual_returns), len(stored_targets))], stored_targets[:min(len(manual_returns), len(stored_targets))])[0,1]:.6f}")
+                # Calculate forward-looking returns properly
+                forward_returns = np.zeros(len(close_prices))
+                for j in range(len(close_prices) - 1):
+                    forward_returns[j] = (close_prices[j + 1] - close_prices[j]) / close_prices[j]
                 
-                # Check for sign inversion
-                if len(manual_returns) > 0 and len(stored_targets) > 0:
-                    min_len = min(len(manual_returns), len(stored_targets))
-                    neg_corr = np.corrcoef(manual_returns[:min_len], -stored_targets[:min_len])[0,1]
-                    if neg_corr > 0.8:
-                        print(f"   ❌ POTENTIAL SIGN INVERSION DETECTED! Negative correlation: {neg_corr:.6f}")
-                    else:
-                        print(f"   ✅ No sign inversion detected")
-                        
-                # Check target calculation consistency across the dataframe
-                print(f"   Target calculation consistency check:")
-                manual_targets = (closes[1:] - closes[:-1]) / closes[:-1]
-                stored_check = symbol_df['target'].values[:-1]  # Exclude last NaN
-                min_len = min(len(manual_targets), len(stored_check))
-                if min_len > 0:
-                    consistency = np.corrcoef(manual_targets[:min_len], stored_check[:min_len])[0,1]
-                    print(f"     Consistency correlation: {consistency:.6f}")
-                    if consistency < 0.99:
-                        print(f"   ⚠️  TARGET CALCULATION INCONSISTENCY DETECTED!")
-                        for i in range(min(3, min_len)):
-                            print(f"     Row {i}: manual={manual_targets[i]:.6f}, stored={stored_check[i]:.6f}, diff={abs(manual_targets[i]-stored_check[i]):.6f}")
+                # Replace target with properly calculated forward returns
+                targets = forward_returns
+                print(f"   🔄 Using calculated forward returns instead of target column")
+                print(f"   📊 Calculated returns: mean={np.mean(targets):.6f}, std={np.std(targets):.6f}")
             
-            # 🔍 DEBUG: Check sequence alignment
-            print(f"   Creating sequences...")
-            sequence_count = 0
+            # Handle missing values in features
+            features = np.nan_to_num(features, nan=0.0, posinf=1e10, neginf=-1e10)
+            
+            # Process targets safely to prevent numerical instability
+            targets = self.process_targets_safely(targets)
+            
+            # Add debugging for the first symbol only to avoid spam
+            if len(all_X) == 0:  # First symbol being processed
+                print(f"\n🔍 DEBUGGING FIRST SYMBOL: {symbol}")
+                self.debug_temporal_alignment(symbol_df)
+                self.debug_sequence_logic(symbol_df, self.sequence_length, predict_len)
+                self.debug_prediction_bias(targets, symbol_df)
+            
+            # Basic data validation for debugging
+            print(f"   📊 {symbol}: {len(symbol_df)} rows, target mean={targets.mean():.4f}, std={targets.std():.4f}, range=[{targets.min():.4f}, {targets.max():.4f}]")
             
             # Create sequences with multi-step targets (sliding window approach)
             # CRITICAL: This ensures no future peeking - features[i-sequence_length:i] uses ONLY past data
             # to predict targets[i:i+predict_len] which are future returns
+            sequence_count = 0
+            
             for i in range(self.sequence_length, len(symbol_df) - predict_len + 1):
                 # Feature sequence: past sequence_length timesteps flattened
                 # Uses data from [i-sequence_length, i) - strictly historical data
@@ -385,17 +418,6 @@ class MultimodalStockPredictor:
                 # Multi-step targets: next predict_len timesteps  
                 # Uses data from [i, i+predict_len) - strictly future data
                 multi_targets = targets[i:i+predict_len]
-                
-                # 🔍 DEBUG: Check first few sequences for temporal alignment
-                if sequence_count < 3:
-                    print(f"   Sequence {sequence_count}:")
-                    print(f"     Feature period: rows {i-self.sequence_length} to {i-1}")
-                    print(f"     Target period: rows {i} to {i+predict_len-1}")
-                    print(f"     Feature dates: {symbol_df.iloc[i-self.sequence_length]['date']} to {symbol_df.iloc[i-1]['date'] if i > 0 else 'N/A'}")
-                    print(f"     Target dates: {symbol_df.iloc[i]['date']} to {symbol_df.iloc[i+predict_len-1]['date']}")
-                    print(f"     Target values: {multi_targets}")
-                    print(f"     Last feature close: {symbol_df.iloc[i-1]['close'] if 'close' in symbol_df.columns else 'N/A'}")
-                    print(f"     First target close: {symbol_df.iloc[i]['close'] if 'close' in symbol_df.columns else 'N/A'}")
                 
                 # Metadata (timestamp of the first prediction) 
                 timestamp = symbol_df.iloc[i]['date'] if 'date' in symbol_df.columns else i
@@ -442,6 +464,128 @@ class MultimodalStockPredictor:
         """
         mask = symbols == symbol
         return X[mask], y[mask], timestamps[mask], np.full(mask.sum(), symbol)
+    
+    def debug_temporal_alignment(self, symbol_df):
+        """Debug what the target column actually represents"""
+        
+        print("🔍 Debugging temporal alignment...")
+        
+        # Check first few rows
+        sample_df = symbol_df.head(10)
+        
+        if 'date' in sample_df.columns:
+            print("📅 Dates and targets:")
+            for idx, row in sample_df.iterrows():
+                print(f"  {row['date']}: target = {row['target']:.6f}")
+        
+        # Check if target is returns or prices
+        target_values = symbol_df['target'].values[:100]
+        print(f"📊 Target statistics:")
+        print(f"  Mean: {np.mean(target_values):.6f}")
+        print(f"  Std: {np.std(target_values):.6f}")
+        print(f"  Range: [{np.min(target_values):.6f}, {np.max(target_values):.6f}]")
+        
+        # Compare with close prices
+        if 'close' in symbol_df.columns:
+            close_prices = symbol_df['close'].values[:100]
+            manual_returns = np.diff(close_prices) / close_prices[:-1]
+            
+            print(f"📈 Manual returns (from close prices):")
+            print(f"  Mean: {np.mean(manual_returns):.6f}")
+            print(f"  Std: {np.std(manual_returns):.6f}")
+            
+            # Check correlation between target and manual returns
+            if len(target_values) > len(manual_returns):
+                target_subset = target_values[1:len(manual_returns)+1]  # Skip first
+            else:
+                target_subset = target_values[:len(manual_returns)]
+                
+            corr = np.corrcoef(target_subset, manual_returns[:len(target_subset)])[0,1]
+            print(f"📊 Correlation between target and manual returns: {corr:.4f}")
+            
+            if corr < 0.5:
+                print("🚨 LOW CORRELATION - Target might not be returns!")
+    
+    def debug_sequence_logic(self, symbol_df, sequence_length=30, predict_len=5):
+        """Debug the sequence creation logic"""
+        
+        features = symbol_df[['close']].values if 'close' in symbol_df.columns else symbol_df[['target']].values
+        targets = symbol_df['target'].values
+        dates = symbol_df['date'].values if 'date' in symbol_df.columns else None
+        
+        # Check a specific sequence
+        i = sequence_length + 5  # Example index
+        
+        print(f"🔍 Sequence at index {i}:")
+        
+        if dates is not None and len(dates) > i + predict_len:
+            feature_dates = dates[i-sequence_length:i]
+            target_dates = dates[i:i+predict_len]
+            
+            print(f"📅 Feature period: {feature_dates[0]} to {feature_dates[-1]}")
+            print(f"📅 Target period: {target_dates[0]} to {target_dates[-1]}")
+            
+            # Check for overlap
+            if feature_dates[-1] >= target_dates[0]:
+                print("🚨 TEMPORAL LEAKAGE DETECTED!")
+                print(f"   Last feature date: {feature_dates[-1]}")
+                print(f"   First target date: {target_dates[0]}")
+        
+        # Show actual values
+        if len(features) > i:
+            feature_values = features[i-sequence_length:i, 0] if features.shape[1] > 0 else features[i-sequence_length:i]
+            target_values = targets[i:i+predict_len]
+            
+            print(f"📊 Feature values (last 5): {feature_values[-5:] if len(feature_values) >= 5 else feature_values}")
+            print(f"📊 Target values: {target_values}")
+            
+            # Calculate what the returns SHOULD be
+            if len(feature_values) > 1 and 'close' in symbol_df.columns:
+                last_price = feature_values[-1]
+                print(f"📈 Last known price: {last_price}")
+                
+                # If targets are returns, what would the future prices be?
+                future_prices = [last_price]
+                for ret in target_values:
+                    future_prices.append(future_prices[-1] * (1 + ret))
+                
+                print(f"📈 Implied future prices: {future_prices[1:]}")
+    
+    def debug_prediction_bias(self, corrected_targets, symbol_df):
+        """Debug the prediction bias fix by comparing original vs corrected targets"""
+        
+        print("🔍 Debugging prediction bias fix...")
+        
+        # Compare original target column vs our corrected targets
+        original_targets = symbol_df['target'].values
+        
+        print(f"📊 Original target column statistics:")
+        print(f"  Mean: {np.mean(original_targets):.6f}")
+        print(f"  Std: {np.std(original_targets):.6f}")
+        print(f"  Range: [{np.min(original_targets):.6f}, {np.max(original_targets):.6f}]")
+        
+        print(f"📊 Corrected targets (forward returns) statistics:")
+        print(f"  Mean: {np.mean(corrected_targets):.6f}")
+        print(f"  Std: {np.std(corrected_targets):.6f}")
+        print(f"  Range: [{np.min(corrected_targets):.6f}, {np.max(corrected_targets):.6f}]")
+        
+        # Calculate correlation between original and corrected
+        min_length = min(len(original_targets), len(corrected_targets))
+        if min_length > 1:
+            corr = np.corrcoef(original_targets[:min_length], corrected_targets[:min_length])[0,1]
+            print(f"📊 Correlation between original and corrected targets: {corr:.4f}")
+            
+            if corr < 0.5:
+                print("✅ LOW CORRELATION CONFIRMED - Fix is working!")
+                print("   Original target column was NOT proper forward returns")
+                print("   Now using calculated forward returns from close prices")
+            else:
+                print("⚠️ High correlation - original targets might have been correct")
+        
+        # Show first few values for comparison
+        print(f"📋 First 10 values comparison:")
+        print(f"   Original: {original_targets[:10]}")
+        print(f"   Corrected: {corrected_targets[:10]}")
 
 class FixedBaselineRunner:
     """Runs baseline models with robust error handling."""
@@ -453,6 +597,35 @@ class FixedBaselineRunner:
         
         self.results = {}  # Will store results per symbol per model
         self.models = {}
+        
+    def validate_model_predictions(self, y_pred, model_name):
+        """
+        Validate and clean model predictions to prevent numerical errors.
+        
+        Args:
+            y_pred: Model predictions
+            model_name: Name of the model for logging
+            
+        Returns:
+            y_pred_cleaned: Validated predictions
+        """
+        # Check for NaN/Inf values
+        nan_count = np.sum(np.isnan(y_pred))
+        inf_count = np.sum(np.isinf(y_pred))
+        
+        if nan_count > 0 or inf_count > 0:
+            print(f"   ⚠️ {model_name} produced {nan_count} NaN and {inf_count} Inf predictions")
+            y_pred = np.nan_to_num(y_pred, nan=0.0, posinf=0.2, neginf=-0.2)
+        
+        # Clip extreme predictions that could cause downstream issues
+        y_pred_clipped = np.clip(y_pred, -1.0, 1.0)  # ±100% max daily return prediction
+        
+        # Check if clipping was significant
+        clipped_count = np.sum(np.abs(y_pred) > 1.0)
+        if clipped_count > 0:
+            print(f"   📐 {model_name}: Clipped {clipped_count}/{len(y_pred)} extreme predictions")
+        
+        return y_pred_clipped
         
     def load_multimodal_data(self) -> Tuple[Any, Any]:
         """Load multimodal data using the exact same method as TFT pipeline."""
@@ -596,7 +769,7 @@ class FixedBaselineRunner:
         
         # Traditional ML models
         base_models = {
-            'Linear Regression': LinearRegression(),
+            'Ridge Regression': Ridge(alpha=1.0, max_iter=1000),  # Regularized linear model
             'Random Forest': RandomForestRegressor(
                 n_estimators=100,
                 max_depth=10, 
@@ -611,6 +784,8 @@ class FixedBaselineRunner:
                 n_estimators=100,
                 max_depth=6,
                 learning_rate=0.1,
+                reg_alpha=0.1,  # L1 regularization for stability
+                reg_lambda=1.0,  # L2 regularization for stability
                 random_state=42,
                 n_jobs=-1,
                 verbosity=0
@@ -811,6 +986,9 @@ class FixedBaselineRunner:
         # Run ablation across all feature modes
         feature_modes = ['full', 'no_news', 'no_economic', 'no_technical', 'ohlcv_only', 'core']
         
+        total_attempts = 0
+        successful_runs = 0
+        
         for feature_mode in feature_modes:
             print(f"\n📊 Testing feature mode: {feature_mode} - {FEATURE_MODES[feature_mode]}")
             
@@ -847,6 +1025,11 @@ class FixedBaselineRunner:
                 y_val_symbol = y_val[val_mask]
                 timestamps_val_symbol = timestamps_val[val_mask]
                 
+                # Validate we have enough data
+                if len(X_train_symbol) < 10 or len(X_val_symbol) < 5:
+                    print(f"❌ Insufficient data for {symbol} in mode {feature_mode}: train={len(X_train_symbol)}, val={len(X_val_symbol)}")
+                    continue
+                
                 # Get starting prices for validation sequences
                 train_symbol_df = train_datamodule.feature_df[train_datamodule.feature_df['symbol'] == symbol].copy()
                 train_symbol_df = train_symbol_df.sort_values('time_idx').reset_index(drop=True)
@@ -857,36 +1040,84 @@ class FixedBaselineRunner:
                 else:
                     starting_prices = np.ones(len(X_val_symbol)) * 100  # Default price
                 
-                print(f"📊 {symbol} ({feature_mode}): {len(X_train_symbol)} train, {len(X_val_symbol)} test samples")
-                print(f"📊 Feature shape: {X_train_symbol.shape}")
-                print(f"📊 Target shape: {y_train_symbol.shape}")
+                print(f"📊 {symbol} ({feature_mode}): {len(X_train_symbol)} train, {len(X_val_symbol)} test samples, {X_train_symbol.shape[1]} features")
                 
-                # Scale features - CRITICAL: Fit scaler ONLY on training data
-                scaler = StandardScaler()
+                # Enhanced feature scaling with RobustScaler for better outlier handling
+                scaler = RobustScaler(quantile_range=(25.0, 75.0))
                 try:
                     X_train_scaled = scaler.fit_transform(X_train_symbol)
                     X_val_scaled = scaler.transform(X_val_symbol)
+                    
+                    # Clip extreme values to prevent numerical overflow
+                    X_train_scaled = np.clip(X_train_scaled, -10, 10)
+                    X_val_scaled = np.clip(X_val_scaled, -10, 10)
+                    
                 except Exception as e:
-                    print(f"   ⚠️ Scaling failed: {e}, using unscaled features")
-                    X_train_scaled = X_train_symbol
-                    X_val_scaled = X_val_symbol
+                    print(f"   ⚠️ RobustScaler failed: {e}, trying StandardScaler")
+                    try:
+                        scaler = StandardScaler()
+                        X_train_scaled = scaler.fit_transform(X_train_symbol)
+                        X_val_scaled = scaler.transform(X_val_symbol)
+                        X_train_scaled = np.clip(X_train_scaled, -10, 10)
+                        X_val_scaled = np.clip(X_val_scaled, -10, 10)
+                    except Exception as e2:
+                        print(f"   ⚠️ All scaling failed: {e2}, using unscaled features")
+                        X_train_scaled = X_train_symbol
+                        X_val_scaled = X_val_symbol
                 
                 # Train and evaluate each model for this feature mode
+                mode_successful = 0
                 for model_name, model in self.models.items():
                     model_key = f"{model_name}_{feature_mode}"
                     print(f"   🔄 Training {model_key}...")
+                    total_attempts += 1
                     
                     try:
-                        # Fit model
-                        model.fit(X_train_scaled, y_train_symbol)
+                        # Validate input data before training
+                        if X_train_scaled.shape[1] < 1:
+                            raise ValueError(f"No features available after filtering for mode {feature_mode}")
                         
-                        # Make predictions
-                        y_pred = model.predict(X_val_scaled)
+                        if X_train_scaled.shape[0] < 5:
+                            raise ValueError(f"Insufficient training samples: {X_train_scaled.shape[0]}")
                         
-                        # Calculate metrics
-                        metrics = self.calculate_metrics(y_val_symbol, y_pred, starting_prices)
+                        # Check for invalid values in features
+                        if np.any(np.isnan(X_train_scaled)) or np.any(np.isinf(X_train_scaled)):
+                            print(f"   ⚠️ {model_key}: Cleaning invalid values in features")
+                            X_train_scaled = np.nan_to_num(X_train_scaled, nan=0.0, posinf=1.0, neginf=-1.0)
+                            X_val_scaled = np.nan_to_num(X_val_scaled, nan=0.0, posinf=1.0, neginf=-1.0)
                         
-                        # Store results
+                        # Fit model with additional error handling
+                        from sklearn.base import clone
+                        model_clone = clone(model.base_model) if hasattr(model, 'base_model') else clone(model)
+                        multi_step_model = MultiStepPredictor(model_clone, self.config.get('predict_len', 5))
+                        multi_step_model.fit(X_train_scaled, y_train_symbol)
+                        
+                        # Make predictions and validate them
+                        y_pred_raw = multi_step_model.predict(X_val_scaled)
+                        y_pred = self.validate_model_predictions(y_pred_raw, model_name)
+                        
+                        # Calculate metrics with error handling
+                        try:
+                            metrics = self.calculate_metrics(y_val_symbol, y_pred, starting_prices)
+                        except Exception as metric_error:
+                            print(f"   ⚠️ {model_key}: Metrics calculation failed: {metric_error}")
+                            # Create fallback metrics
+                            metrics = {
+                                'r2_returns': -999.0, 'accuracy': 0.0, 'sharpe_ratio': -999.0,
+                                'mae_returns': 999.0, 'rmse_returns': 999.0, 
+                                'failed_metrics': True, 'error': str(metric_error)
+                            }
+                        
+                        # Debug prediction bias for first model of first symbol
+                        if total_attempts == 1:  # First model being trained
+                            print(f"\n🔍 DEBUGGING PREDICTION BIAS FOR {model_key}:")
+                            try:
+                                predictor = MultimodalStockPredictor()
+                                predictor.debug_prediction_bias(y_val_symbol, y_pred)
+                            except Exception as debug_error:
+                                print(f"   ⚠️ Debug failed: {debug_error}")
+                        
+                        # Store results (even if metrics failed)
                         self.results[symbol][model_key] = {
                             'predictions': y_pred,
                             'actuals': y_val_symbol,
@@ -894,20 +1125,73 @@ class FixedBaselineRunner:
                             'prices': starting_prices,
                             'metrics': metrics,
                             'feature_mode': feature_mode,
-                            'n_features': X_train_symbol.shape[1]
+                            'n_features': X_train_scaled.shape[1],
+                            'training_successful': True,
+                            'data_shape': X_train_scaled.shape
                         }
                         
-                        print(f"   ✅ {model_key}: R²={metrics['r2_returns']:.3f}, Acc={metrics['accuracy']:.3f}, Sharpe={metrics['sharpe_ratio']:.3f}")
+                        # Display results
+                        r2_val = metrics.get('r2_returns', -999)
+                        acc_val = metrics.get('accuracy', 0)
+                        sharpe_val = metrics.get('sharpe_ratio', -999)
+                        
+                        if metrics.get('failed_metrics', False):
+                            print(f"   ⚠️ {model_key}: Training succeeded but metrics failed")
+                        else:
+                            print(f"   ✅ {model_key}: R²={r2_val:.3f}, Acc={acc_val:.3f}, Sharpe={sharpe_val:.3f}")
+                        
+                        successful_runs += 1
+                        mode_successful += 1
                         
                     except Exception as e:
-                        print(f"   ❌ {model_key} failed: {e}")
+                        print(f"   ❌ {model_key} failed: {str(e)}")
+                        
+                        # Store failure information for debugging
+                        self.results[symbol][model_key] = {
+                            'training_successful': False,
+                            'error': str(e),
+                            'feature_mode': feature_mode,
+                            'n_features': X_train_scaled.shape[1] if 'X_train_scaled' in locals() else 0,
+                            'data_shape': X_train_scaled.shape if 'X_train_scaled' in locals() else (0, 0),
+                            'metrics': {
+                                'r2_returns': np.nan, 'accuracy': np.nan, 'sharpe_ratio': np.nan,
+                                'failed_training': True
+                            }
+                        }
                         continue
+                
+                if mode_successful == 0:
+                    print(f"   ⚠️ No models succeeded for feature mode {feature_mode}")
+                else:
+                    print(f"   ✅ Feature mode {feature_mode}: {mode_successful}/{len(self.models)} models succeeded")
                         
             except Exception as e:
                 print(f"❌ Failed to process {symbol} with feature mode {feature_mode}: {e}")
+                import traceback
+                print(f"   Detailed error: {traceback.format_exc()}")
                 continue
         
         print(f"\n✅ Completed ablation study for {symbol}")
+        print(f"   📊 Success rate: {successful_runs}/{total_attempts} ({100*successful_runs/max(1,total_attempts):.1f}%)")
+        print(f"   🎯 Total results stored: {len(self.results[symbol])}")
+        
+        # Print summary of what was actually generated
+        if self.results[symbol]:
+            modes_tested = set()
+            models_tested = set()
+            for key in self.results[symbol].keys():
+                if '_' in key:
+                    parts = key.split('_')
+                    if len(parts) >= 2:
+                        model = '_'.join(parts[:-1])
+                        mode = parts[-1]
+                        modes_tested.add(mode)
+                        models_tested.add(model)
+            
+            print(f"   📋 Feature modes with results: {sorted(modes_tested)}")
+            print(f"   🤖 Models with results: {sorted(models_tested)}")
+        else:
+            print(f"   ⚠️ No successful results for {symbol}")
 
     def train_and_evaluate_symbol(self, train_datamodule: Any, val_datamodule: Any, symbol: str, 
                                   use_multimodal: bool = True):
@@ -975,21 +1259,34 @@ class FixedBaselineRunner:
             print(f"📊 Target shape: {y_train_symbol.shape} (multi-step: {predict_len} steps)")
             print(f"📊 Using multimodal features: {use_multimodal}")
             
-            # Scale features - CRITICAL: Fit scaler ONLY on training data to prevent data leakage
-            scaler = StandardScaler()
+            # Enhanced feature scaling with RobustScaler for better outlier handling
+            scaler = RobustScaler(quantile_range=(25.0, 75.0))
             try:
                 # ✅ CORRECT: Fit scaler on training data only
                 X_train_scaled = scaler.fit_transform(X_train_symbol)
                 # ✅ CORRECT: Transform validation data using training statistics only
                 X_val_scaled = scaler.transform(X_val_symbol)
                 
-                print(f"   ✅ Feature scaling completed - no data leakage")
-                print(f"      Training mean: {X_train_scaled.mean():.4f}, std: {X_train_scaled.std():.4f}")
-                print(f"      Validation mean: {X_val_scaled.mean():.4f}, std: {X_val_scaled.std():.4f}")
+                # Clip extreme values to prevent numerical overflow
+                X_train_scaled = np.clip(X_train_scaled, -10, 10)
+                X_val_scaled = np.clip(X_val_scaled, -10, 10)
+                
+                print(f"   ✅ RobustScaler completed - no data leakage")
+                print(f"      Training median: {np.median(X_train_scaled):.4f}, IQR: {np.percentile(X_train_scaled, 75) - np.percentile(X_train_scaled, 25):.4f}")
+                print(f"      Validation median: {np.median(X_val_scaled):.4f}, IQR: {np.percentile(X_val_scaled, 75) - np.percentile(X_val_scaled, 25):.4f}")
                 
             except Exception as e:
-                print(f"❌ Scaling failed for {symbol}: {e}")
-                return
+                print(f"   ⚠️ RobustScaler failed: {e}, trying StandardScaler")
+                try:
+                    scaler = StandardScaler()
+                    X_train_scaled = scaler.fit_transform(X_train_symbol)
+                    X_val_scaled = scaler.transform(X_val_symbol)
+                    X_train_scaled = np.clip(X_train_scaled, -10, 10)
+                    X_val_scaled = np.clip(X_val_scaled, -10, 10)
+                    print(f"   ✅ StandardScaler fallback completed")
+                except Exception as e2:
+                    print(f"❌ All scaling failed for {symbol}: {e2}")
+                    return
             
             # Initialize results for this symbol
             if symbol not in self.results:
@@ -1787,20 +2084,46 @@ class FixedBaselineRunner:
             import matplotlib.pyplot as plt
             import numpy as np
             
-            # Extract data for heatmap
-            models = ['Linear Regression', 'Random Forest']
-            if 'XGBoost' in [key.split('_')[0] for key in self.results[symbol].keys()]:
-                models.append('XGBoost')
-                
-            feature_modes = ['full', 'no_news', 'no_economic', 'no_technical', 'core', 'ohlcv_only']
+            # Define expected models and feature modes
+            expected_models = ['Ridge Regression', 'Random Forest', 'XGBoost']
+            expected_feature_modes = ['full', 'no_news', 'no_economic', 'no_technical', 'core', 'ohlcv_only']
+            
+            # Filter to only include expected models that exist in results
+            all_keys = list(self.results[symbol].keys())
+            valid_models = []
+            valid_feature_modes = []
+            
+            print(f"   🔍 Analyzing keys: {all_keys}")
+            
+            # Extract valid model-feature combinations
+            for key in all_keys:
+                for model in expected_models:
+                    for mode in expected_feature_modes:
+                        expected_key = f"{model}_{mode}"
+                        if key == expected_key:
+                            if model not in valid_models:
+                                valid_models.append(model)
+                            if mode not in valid_feature_modes:
+                                valid_feature_modes.append(mode)
+            
+            # Sort for consistent ordering
+            valid_models = sorted(valid_models)
+            valid_feature_modes = sorted(valid_feature_modes)
+            
+            print(f"   🎯 Valid models: {valid_models}")
+            print(f"   📊 Valid feature modes: {valid_feature_modes}")
+            
+            if not valid_models or not valid_feature_modes:
+                print(f"   ⚠️ Insufficient valid data for heatmap - models: {len(valid_models)}, modes: {len(valid_feature_modes)}")
+                return
             
             # Create matrices for different metrics
-            r2_matrix = np.full((len(models), len(feature_modes)), np.nan)
-            accuracy_matrix = np.full((len(models), len(feature_modes)), np.nan)
-            sharpe_matrix = np.full((len(models), len(feature_modes)), np.nan)
+            r2_matrix = np.full((len(valid_models), len(valid_feature_modes)), np.nan)
+            accuracy_matrix = np.full((len(valid_models), len(valid_feature_modes)), np.nan)
+            sharpe_matrix = np.full((len(valid_models), len(valid_feature_modes)), np.nan)
             
-            for i, model in enumerate(models):
-                for j, mode in enumerate(feature_modes):
+            for i, model in enumerate(valid_models):
+                for j, mode in enumerate(valid_feature_modes):
                     key = f"{model}_{mode}"
                     if key in self.results[symbol]:
                         metrics = self.results[symbol][key]['metrics']
@@ -1808,58 +2131,118 @@ class FixedBaselineRunner:
                         accuracy_matrix[i, j] = metrics['accuracy']
                         sharpe_matrix[i, j] = metrics['sharpe_ratio']
             
-            # Create the heatmap plot
-            fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+            # Check if we have any data
+            if np.isnan(r2_matrix).all():
+                print(f"   ⚠️ No valid data found for heatmap")
+                return
+            
+            # Calculate dynamic figure size based on content
+            n_models = len(valid_models)
+            n_modes = len(valid_feature_modes)
+            
+            # Base sizing: wider for more columns, taller for more rows
+            base_width_per_heatmap = max(4, n_modes * 0.8)  # Minimum 4, scale with columns
+            base_height = max(3, n_models * 0.6)  # Minimum 3, scale with rows
+            total_width = base_width_per_heatmap * 3 + 3  # 3 heatmaps + spacing
+            
+            print(f"   📐 Dynamic sizing: {n_models} models × {n_modes} modes → {total_width:.1f}×{base_height:.1f}")
+            
+            # Create the heatmap plot with dynamic sizing
+            fig, axes = plt.subplots(1, 3, figsize=(total_width, base_height))
             fig.suptitle(f'{symbol} - Ablation Study Performance Heatmap', fontsize=16, fontweight='bold')
             
+            # Adjust spacing between subplots
+            plt.subplots_adjust(wspace=0.4, hspace=0.3)
+            
+            # Prepare feature mode labels with better formatting
+            mode_labels = []
+            for mode in valid_feature_modes:
+                if mode in FEATURE_MODES:
+                    # Use the descriptive name but make it shorter
+                    label = FEATURE_MODES[mode]
+                    if len(label) > 20:  # Truncate very long labels
+                        label = label.replace('All multimodal features', 'Full')
+                        label = label.replace('All except ', 'No ')
+                        label = label.replace(' embeddings', '')
+                        label = label.replace(' indicators', '')
+                    mode_labels.append(label)
+                else:
+                    mode_labels.append(mode.replace('_', ' ').title())
+            
             # R² heatmap
-            im1 = axes[0].imshow(r2_matrix, cmap='RdYlGn', aspect='auto', vmin=-0.1, vmax=0.3)
-            axes[0].set_title('R² Score (Returns Prediction)')
-            axes[0].set_xticks(range(len(feature_modes)))
-            axes[0].set_xticklabels([FEATURE_MODES[mode].replace(' ', '\n') for mode in feature_modes], rotation=45, ha='right')
-            axes[0].set_yticks(range(len(models)))
-            axes[0].set_yticklabels(models)
+            vmin_r2, vmax_r2 = np.nanmin(r2_matrix), np.nanmax(r2_matrix)
+            if vmin_r2 == vmax_r2:  # Handle edge case
+                vmin_r2, vmax_r2 = vmin_r2 - 0.1, vmax_r2 + 0.1
             
-            # Add text annotations
-            for i in range(len(models)):
-                for j in range(len(feature_modes)):
+            im1 = axes[0].imshow(r2_matrix, cmap='RdYlGn', aspect='auto', vmin=vmin_r2, vmax=vmax_r2)
+            axes[0].set_title('R² Score (Returns Prediction)', fontsize=12, pad=20)
+            axes[0].set_xticks(range(len(valid_feature_modes)))
+            axes[0].set_xticklabels(mode_labels, rotation=45, ha='right', fontsize=10)
+            axes[0].set_yticks(range(len(valid_models)))
+            axes[0].set_yticklabels(valid_models, fontsize=10)
+            
+            # Add text annotations with better formatting
+            for i in range(len(valid_models)):
+                for j in range(len(valid_feature_modes)):
                     if not np.isnan(r2_matrix[i, j]):
+                        # Dynamic text color based on value
+                        text_color = 'white' if r2_matrix[i, j] < (vmin_r2 + vmax_r2) / 2 else 'black'
+                        # Adjust font size based on cell size
+                        font_size = max(8, min(12, base_width_per_heatmap / n_modes * 2))
                         axes[0].text(j, i, f'{r2_matrix[i, j]:.3f}', ha='center', va='center', 
-                                   color='white' if r2_matrix[i, j] < 0.1 else 'black', fontweight='bold')
+                                   color=text_color, fontweight='bold', fontsize=font_size)
             
-            plt.colorbar(im1, ax=axes[0])
+            # Add colorbar with proper sizing
+            cbar1 = plt.colorbar(im1, ax=axes[0], shrink=0.8)
+            cbar1.ax.tick_params(labelsize=9)
             
             # Accuracy heatmap
-            im2 = axes[1].imshow(accuracy_matrix, cmap='RdYlGn', aspect='auto', vmin=0.45, vmax=0.65)
-            axes[1].set_title('Directional Accuracy')
-            axes[1].set_xticks(range(len(feature_modes)))
-            axes[1].set_xticklabels([FEATURE_MODES[mode].replace(' ', '\n') for mode in feature_modes], rotation=45, ha='right')
-            axes[1].set_yticks(range(len(models)))
-            axes[1].set_yticklabels(models)
+            vmin_acc, vmax_acc = np.nanmin(accuracy_matrix), np.nanmax(accuracy_matrix)
+            if vmin_acc == vmax_acc:
+                vmin_acc, vmax_acc = vmin_acc - 0.1, vmax_acc + 0.1
+                
+            im2 = axes[1].imshow(accuracy_matrix, cmap='RdYlGn', aspect='auto', vmin=vmin_acc, vmax=vmax_acc)
+            axes[1].set_title('Directional Accuracy', fontsize=12, pad=20)
+            axes[1].set_xticks(range(len(valid_feature_modes)))
+            axes[1].set_xticklabels(mode_labels, rotation=45, ha='right', fontsize=10)
+            axes[1].set_yticks(range(len(valid_models)))
+            axes[1].set_yticklabels(valid_models, fontsize=10)
             
-            for i in range(len(models)):
-                for j in range(len(feature_modes)):
+            for i in range(len(valid_models)):
+                for j in range(len(valid_feature_modes)):
                     if not np.isnan(accuracy_matrix[i, j]):
+                        text_color = 'white' if accuracy_matrix[i, j] < (vmin_acc + vmax_acc) / 2 else 'black'
+                        font_size = max(8, min(12, base_width_per_heatmap / n_modes * 2))
                         axes[1].text(j, i, f'{accuracy_matrix[i, j]:.3f}', ha='center', va='center',
-                                   color='white' if accuracy_matrix[i, j] < 0.55 else 'black', fontweight='bold')
+                                   color=text_color, fontweight='bold', fontsize=font_size)
             
-            plt.colorbar(im2, ax=axes[1])
+            cbar2 = plt.colorbar(im2, ax=axes[1], shrink=0.8)
+            cbar2.ax.tick_params(labelsize=9)
             
             # Sharpe Ratio heatmap
-            im3 = axes[2].imshow(sharpe_matrix, cmap='RdYlGn', aspect='auto', vmin=-0.5, vmax=0.5)
-            axes[2].set_title('Sharpe Ratio')
-            axes[2].set_xticks(range(len(feature_modes)))
-            axes[2].set_xticklabels([FEATURE_MODES[mode].replace(' ', '\n') for mode in feature_modes], rotation=45, ha='right')
-            axes[2].set_yticks(range(len(models)))
-            axes[2].set_yticklabels(models)
+            vmin_sharpe, vmax_sharpe = np.nanmin(sharpe_matrix), np.nanmax(sharpe_matrix)
+            if vmin_sharpe == vmax_sharpe:
+                vmin_sharpe, vmax_sharpe = vmin_sharpe - 0.1, vmax_sharpe + 0.1
+                
+            im3 = axes[2].imshow(sharpe_matrix, cmap='RdYlGn', aspect='auto', vmin=vmin_sharpe, vmax=vmax_sharpe)
+            axes[2].set_title('Sharpe Ratio', fontsize=12, pad=20)
+            axes[2].set_xticks(range(len(valid_feature_modes)))
+            axes[2].set_xticklabels(mode_labels, rotation=45, ha='right', fontsize=10)
+            axes[2].set_yticks(range(len(valid_models)))
+            axes[2].set_yticklabels(valid_models, fontsize=10)
             
-            for i in range(len(models)):
-                for j in range(len(feature_modes)):
+            for i in range(len(valid_models)):
+                for j in range(len(valid_feature_modes)):
                     if not np.isnan(sharpe_matrix[i, j]):
+                        # For Sharpe ratio, use absolute value for color threshold
+                        mid_point = (vmin_sharpe + vmax_sharpe) / 2
+                        text_color = 'white' if abs(sharpe_matrix[i, j] - mid_point) < abs(vmax_sharpe - vmin_sharpe) * 0.3 else 'black'
+                        font_size = max(8, min(12, base_width_per_heatmap / n_modes * 2))
                         axes[2].text(j, i, f'{sharpe_matrix[i, j]:.3f}', ha='center', va='center',
-                                   color='white' if abs(sharpe_matrix[i, j]) < 0.1 else 'black', fontweight='bold')
+                                   color=text_color, fontweight='bold', fontsize=font_size)
             
-            plt.colorbar(im3, ax=axes[2])
+            cbar3 = plt.colorbar(im3, ax=axes[2], shrink=0.8)
+            cbar3.ax.tick_params(labelsize=9)
             
             plt.tight_layout()
             plot_path = self.output_dir / f"{symbol}_ablation_heatmap.png"
@@ -1870,9 +2253,11 @@ class FixedBaselineRunner:
             
         except Exception as e:
             print(f"❌ Failed to create ablation heatmap for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
 
     def create_feature_contribution_analysis(self, symbol: str):
-        """Create bar chart showing feature group contribution to performance."""
+        """Create bar chart showing feature group contribution to performance with robust missing value handling."""
         if symbol not in self.results or len(self.results[symbol]) == 0:
             print(f"⚠️ No results for feature contribution analysis for {symbol}")
             return
@@ -1884,13 +2269,38 @@ class FixedBaselineRunner:
             import matplotlib.pyplot as plt
             import numpy as np
             
-            # Calculate feature group contributions (performance drop when removing each group)
-            models = ['Linear Regression', 'Random Forest']
-            if any('XGBoost' in key for key in self.results[symbol].keys()):
-                models.append('XGBoost')
+            # Define expected models (only the actual model names)
+            expected_models = ['Ridge Regression', 'Random Forest', 'XGBoost']
+            
+            # Find which models actually have successful results
+            valid_models = []
+            all_keys = list(self.results[symbol].keys())
+            
+            print(f"   🔍 Analyzing available results: {len(all_keys)} total keys")
+            
+            for model in expected_models:
+                full_key = f"{model}_full"
+                if full_key in all_keys:
+                    # Check if the result is valid (not a failure)
+                    result = self.results[symbol][full_key]
+                    if result.get('training_successful', True) and not result.get('metrics', {}).get('failed_training', False):
+                        valid_models.append(model)
+                        print(f"   ✅ {model}: Valid baseline found")
+                    else:
+                        print(f"   ❌ {model}: Baseline failed - {result.get('error', 'Unknown error')}")
+                else:
+                    print(f"   ❌ {model}: No baseline result found")
+            
+            if not valid_models:
+                print(f"⚠️ No valid models with successful full baseline found for {symbol}")
+                print(f"   Available keys: {all_keys}")
+                return
+            
+            print(f"   🎯 Valid models for analysis: {valid_models}")
             
             feature_groups = ['News', 'Economic', 'Technical']
             metrics_to_analyze = ['r2_returns', 'accuracy', 'sharpe_ratio']
+            metric_labels = ['R² Returns', 'Accuracy', 'Sharpe Ratio']
             
             fig, axes = plt.subplots(len(metrics_to_analyze), 1, figsize=(12, 4 * len(metrics_to_analyze)))
             if len(metrics_to_analyze) == 1:
@@ -1898,61 +2308,134 @@ class FixedBaselineRunner:
             
             fig.suptitle(f'{symbol} - Feature Group Contribution Analysis', fontsize=16, fontweight='bold')
             
-            for metric_idx, metric in enumerate(metrics_to_analyze):
+            for metric_idx, (metric, metric_label) in enumerate(zip(metrics_to_analyze, metric_labels)):
                 ax = axes[metric_idx]
                 
                 # Calculate contributions for each model
                 x_pos = np.arange(len(feature_groups))
-                width = 0.25
+                width = 0.25 if len(valid_models) > 1 else 0.5
                 
-                for model_idx, model in enumerate(models):
+                has_any_data = False
+                models_with_data = []
+                
+                for model_idx, model in enumerate(valid_models):
                     contributions = []
+                    contribution_labels = []
                     
                     # Get baseline performance (full features)
                     full_key = f"{model}_full"
-                    if full_key not in self.results[symbol]:
-                        continue
-                    baseline_perf = self.results[symbol][full_key]['metrics'][metric]
+                    baseline_result = self.results[symbol][full_key]
+                    baseline_perf = baseline_result['metrics'][metric]
+                    
+                    print(f"\n   📊 {model} {metric} analysis:")
+                    print(f"     Baseline ({full_key}): {baseline_perf:.4f}")
                     
                     # Calculate performance drop for each ablation
-                    ablation_keys = [f"{model}_no_news", f"{model}_no_economic", f"{model}_no_technical"]
+                    ablation_mappings = [
+                        ('News', 'no_news'),
+                        ('Economic', 'no_economic'), 
+                        ('Technical', 'no_technical')
+                    ]
                     
-                    for ablation_key in ablation_keys:
+                    model_has_data = False
+                    
+                    for group_name, suffix in ablation_mappings:
+                        ablation_key = f"{model}_{suffix}"
+                        
                         if ablation_key in self.results[symbol]:
-                            ablated_perf = self.results[symbol][ablation_key]['metrics'][metric]
-                            contribution = baseline_perf - ablated_perf  # Positive = feature helps
-                            contributions.append(contribution)
+                            ablation_result = self.results[symbol][ablation_key]
+                            
+                            # Check if the ablation result is valid
+                            if (ablation_result.get('training_successful', True) and 
+                                not ablation_result.get('metrics', {}).get('failed_training', False)):
+                                
+                                ablated_perf = ablation_result['metrics'][metric]
+                                contribution = baseline_perf - ablated_perf  # Positive = feature helps
+                                contributions.append(contribution)
+                                contribution_labels.append(f"{contribution:.3f}")
+                                model_has_data = True
+                                
+                                print(f"     {group_name} removal ({ablation_key}): {ablated_perf:.4f} → contribution: {contribution:.4f}")
+                            else:
+                                contributions.append(np.nan)
+                                contribution_labels.append("Failed")
+                                print(f"     {group_name} removal ({ablation_key}): FAILED - {ablation_result.get('error', 'Unknown error')}")
                         else:
-                            contributions.append(0)
+                            contributions.append(np.nan)
+                            contribution_labels.append("Missing")
+                            print(f"     {group_name} removal ({ablation_key}): MISSING")
                     
-                    # Plot bars
-                    bars = ax.bar(x_pos + model_idx * width, contributions, width, 
-                                 label=model, alpha=0.8)
-                    
-                    # Add value labels on bars
-                    for bar, contrib in zip(bars, contributions):
-                        height = bar.get_height()
-                        ax.text(bar.get_x() + bar.get_width()/2., height + 0.001 if height >= 0 else height - 0.001,
-                               f'{contrib:.3f}', ha='center', va='bottom' if height >= 0 else 'top', fontsize=9)
+                    # Plot bars for this model if we have any valid data
+                    if model_has_data:
+                        has_any_data = True
+                        models_with_data.append(model)
+                        
+                        # Convert nan to 0 for plotting, but keep track of which are real vs missing
+                        plot_contributions = []
+                        for contrib in contributions:
+                            if np.isnan(contrib):
+                                plot_contributions.append(0)
+                            else:
+                                plot_contributions.append(contrib)
+                        
+                        # Plot bars
+                        bars = ax.bar(x_pos + model_idx * width, plot_contributions, width, 
+                                     label=model, alpha=0.8)
+                        
+                        # Add value labels on bars
+                        for bar, contrib, label in zip(bars, contributions, contribution_labels):
+                            height = bar.get_height()
+                            
+                            if not np.isnan(contrib) and abs(height) > 1e-6:  # Valid, non-zero contribution
+                                ax.text(bar.get_x() + bar.get_width()/2., 
+                                       height + (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.01 if height >= 0 else height - (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.01,
+                                       label, ha='center', va='bottom' if height >= 0 else 'top', fontsize=9)
+                            elif np.isnan(contrib):  # Missing data
+                                ax.text(bar.get_x() + bar.get_width()/2., 0, 
+                                       'N/A', ha='center', va='center', fontsize=8, 
+                                       style='italic', color='red')
                 
-                ax.set_xlabel('Feature Group Removed')
-                ax.set_ylabel(f'{metric.title().replace("_", " ")} Contribution')
-                ax.set_title(f'{metric.title().replace("_", " ")} - Positive = Feature Helps Performance')
-                ax.set_xticks(x_pos + width)
-                ax.set_xticklabels(feature_groups)
-                ax.legend()
+                # Configure the plot
+                if not has_any_data:
+                    ax.text(0.5, 0.5, 'No valid ablation data available\n(All model-feature combinations failed)', 
+                           transform=ax.transAxes, ha='center', va='center', fontsize=12, style='italic', color='red')
+                    ax.set_title(f'{metric_label} - No Data Available')
+                else:
+                    ax.set_xlabel('Feature Group Removed')
+                    ax.set_ylabel(f'{metric_label} Contribution')
+                    ax.set_title(f'{metric_label} - Positive = Feature Helps Performance')
+                    ax.set_xticks(x_pos + width * (len(valid_models) - 1) / 2)
+                    ax.set_xticklabels(feature_groups)
+                    
+                    if models_with_data:
+                        ax.legend(title='Models with Data')
+                    
+                    # Add horizontal line at zero for reference
+                    ax.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=0.5)
+                
                 ax.grid(True, alpha=0.3)
-                ax.axhline(y=0, color='black', linestyle='-', alpha=0.5)
-            
+                
             plt.tight_layout()
-            plot_path = self.output_dir / f"{symbol}_feature_contribution.png"
-            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-            plt.close()
             
-            print(f"  📈 {symbol} feature contribution analysis saved to {plot_path}")
+            # Save the plot
+            filename = f"{symbol}_feature_contribution_analysis_enhanced.png"
+            filepath = self.output_dir / filename
+            plt.savefig(filepath, dpi=300, bbox_inches='tight')
+            plt.show()
+            
+            print(f"✅ Enhanced feature contribution analysis saved: {filepath}")
+            
+            # Print summary statistics
+            print(f"\n📊 Summary for {symbol}:")
+            print(f"   🎯 Models analyzed: {len(valid_models)}")
+            print(f"   ✅ Models with data: {len(set(models_with_data))}")
+            print(f"   📋 Feature groups: {len(feature_groups)}")
+            print(f"   📈 Metrics analyzed: {len(metrics_to_analyze)}")
             
         except Exception as e:
-            print(f"❌ Failed to create feature contribution analysis for {symbol}: {e}")
+            print(f"❌ Error creating feature contribution analysis: {e}")
+            import traceback
+            print(f"   Detailed error: {traceback.format_exc()}")
 
     def create_ablation_summary_table(self):
         """Create summary table showing best feature combinations across symbols and models."""
@@ -1961,33 +2444,40 @@ class FixedBaselineRunner:
         try:
             import pandas as pd
             
-            # Collect all results
+            # Define expected models and feature modes for validation
+            expected_models = ['Ridge Regression', 'Random Forest', 'XGBoost']
+            expected_feature_modes = ['full', 'no_news', 'no_economic', 'no_technical', 'core', 'ohlcv_only']
+            
+            # Collect all valid results
             summary_data = []
             
             for symbol, symbol_results in self.results.items():
-                for model_feature_key, result in symbol_results.items():
-                    if '_' in model_feature_key:  # Skip non-ablation results
-                        parts = model_feature_key.split('_')
-                        if len(parts) >= 2:
-                            model_name = '_'.join(parts[:-1])
-                            feature_mode = parts[-1]
-                            
+                for model in expected_models:
+                    for mode in expected_feature_modes:
+                        expected_key = f"{model}_{mode}"
+                        if expected_key in symbol_results:
+                            result = symbol_results[expected_key]
                             metrics = result['metrics']
                             summary_data.append({
                                 'Symbol': symbol,
-                                'Model': model_name,
-                                'Feature_Mode': feature_mode,
+                                'Model': model,
+                                'Feature_Mode': mode,
                                 'R2_Returns': metrics['r2_returns'],
                                 'Accuracy': metrics['accuracy'],
                                 'Sharpe_Ratio': metrics['sharpe_ratio'],
-                                'N_Features': result['n_features']
+                                'N_Features': result.get('n_features', 0)
                             })
             
             if not summary_data:
-                print("⚠️ No ablation data found for summary table")
+                print("⚠️ No valid ablation data found for summary table")
+                print("   Expected format: 'Model_FeatureMode' (e.g., 'Ridge Regression_full')")
                 return
             
             df = pd.DataFrame(summary_data)
+            
+            print(f"   ✅ Found {len(summary_data)} valid results across {df['Symbol'].nunique()} symbols")
+            print(f"   📊 Models: {sorted(df['Model'].unique())}")
+            print(f"   🎯 Feature modes: {sorted(df['Feature_Mode'].unique())}")
             
             # Create summary statistics
             print("\n📊 Ablation Study Summary:")
