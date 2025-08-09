@@ -1,0 +1,288 @@
+% MITACS Globalink Research Internship – Final Report
+% Repository: Multi-Modal-Stock-TFT (branch: nelson)
+% This document compiles with pdflatex or xelatex
+
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{setspace}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.multipart, calc}
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue}
+
+% Convenience macros
+\newcommand{\projectTitle}{Multi-Modal Stock Forecasting and Real-Time Affective Computing Games}
+\newcommand{\studentName}{<Nelson Siu>}
+\newcommand{\supervisorName}{<Supervisor Name>}
+\newcommand{\hostUniversity}{<Host University>}
+\newcommand{\homeInstitution}{<Home Institution>}
+\newcommand{\termStr}{Summer 2025}
+\newcommand{\repoLink}{https://github.com/nelonmelons/Multi-Modal-Stock-TFT}
+
+\begin{document}
+
+%------------------------------------------------------------------------------
+% Title Page
+%------------------------------------------------------------------------------
+\begin{titlepage}
+  \centering
+  \vspace*{2cm}
+  {\Large MITACS Globalink Research Internship\\[4pt] Final Report\\}
+  \vspace{2cm}
+  {\huge \bfseries \projectTitle \\}
+  \vspace{1.5cm}
+  \begin{tabular}{ll}
+    Student: & \studentName\\
+    Supervisor: & \supervisorName\\
+    Host University: & \hostUniversity\\
+    Home Institution: & \homeInstitution\\
+    Term: & \termStr\\
+    Repository: & \href{\repoLink}{\repoLink}
+  \end{tabular}
+  \vfill
+  {\large \today}
+\end{titlepage}
+
+%------------------------------------------------------------------------------
+% Executive Summary
+%------------------------------------------------------------------------------
+\pagenumbering{roman}
+\setstretch{1.15}
+\section*{Executive Summary}
+This report documents the outcomes of a Globalink Research Internship focused on two deliverables: (i) a rigorous, leakage-free comparison between classical machine learning, recurrent neural networks (RNNs), gradient boosted trees, and a Temporal Fusion Transformer (TFT) for stock return prediction using multi-modal information (OHLCV, technical indicators, macroeconomic series, news embeddings, and corporate events), and (ii) \emph{Krackle}, a real-time browser game that detects smiles and triggers gameplay using on-device computer vision.
+
+For initiative (i), the codebase implements a full pipeline with causal normalization, a 21-day temporal buffer to prevent lookahead bias, symbol holdout and temporal holdout options, calibrated evaluation metrics (MSE/MAE/R$^2$/Directional Accuracy), and a trading simulator reporting Sharpe ratio, max drawdown, and benchmark comparisons (DCA and buy-and-hold). Using the repository's unified pipeline, we conducted ablations across modalities (e.g., removing news, technical, or macro features). A representative single-stock study (AAPL) indicates moderate directional accuracy (approximately 0.53–0.59 across models), mixed R$^2$ for raw return regression (often negative in daily horizons), and non-trivial Sharpe for tree models under certain ablations. Empirically, RNN-based baselines were more robust than transformer variants on short-horizon daily returns, and news features improved stability only in select cases.
+
+For initiative (ii), Krackle delivers a privacy-aware, low-latency smile-detection game using TensorFlow.js and WebGL for inference, with a Django backend, WebSockets for real-time scoreboards, and optional OpenCV-based server inference. On-device processing avoids storing raw images; only derived events and ephemeral scores are transmitted.
+
+\tableofcontents
+\listoffigures
+\listoftables
+\clearpage
+\pagenumbering{arabic}
+
+%------------------------------------------------------------------------------
+% Project Overview
+%------------------------------------------------------------------------------
+\section{Project Overview}
+\subsection{Objectives}
+The internship pursued two goals:
+\begin{itemize}[leftmargin=*]
+  \item Build an end-to-end, production-ready time series research framework for \textbf{multi-modal stock prediction}, capable of honest evaluation and ablations across data sources and model families.
+  \item Prototype a \textbf{real-time smile detection web game (Krackle)} showcasing human-in-the-loop sensing, low-latency inference, and privacy-preserving design.
+\end{itemize}
+
+\subsection{Codebase at a Glance}
+The repository (\href{\repoLink}{\repoLink}) contains a production-ready TFT pipeline under \texttt{Hayson/TFT/}, including:\vspace{-2pt}
+\begin{itemize}[leftmargin=*]
+  \item \texttt{unified\_tft\_pipeline.py}: Orchestrates caching, feature engineering, temporal/symbol holdout, training, analysis, OHLC visualizations, and trading simulation.
+  \item \texttt{tft\_multimodal.py}: TFT and Enhanced-TFT implementations featuring Variable Selection Networks (VSN), Gated Residual Networks (GRN), multi-head attention, and a conditional news encoder.
+  \item \texttt{dataModule/}: Multi-modal data loaders (stock, news, macro, events, technical), feature building, and leakage-free normalization.
+  \item \texttt{trading\_simulator.py}, \texttt{ohlc\_plotter.py}: Backtesting and visualization utilities.
+  \item Baselines under \texttt{Hayson/baselines/}: LSTM variants, encoder/decoder RNNs, and classical models for comparison.
+\end{itemize}
+
+%------------------------------------------------------------------------------
+% Initiative I – Multi-Modal Stock Prediction
+%------------------------------------------------------------------------------
+\section{Initiative I: Multi-Modal Stock Return Prediction}
+\subsection{Problem Statement}
+Given daily sequences of stock market data and exogenous signals, forecast next-step returns and evaluate both statistical fit and trading utility. We target realistic evaluation: no future peeking, strictly causal feature transforms, and clear separation between training and validation regimes.
+
+\subsection{Data and Feature Engineering}
+\paragraph{Modalities}
+The pipeline integrates:
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Market}: OHLCV; derived technical indicators (e.g., SMA, RSI, MACD, Bollinger bands) via \texttt{compute\_ta.py}.
+  \item \textbf{Macroeconomic}: FRED series (e.g., CPI, FEDFUNDS, UNRATE) via \texttt{fetch\_fred.py}.
+  \item \textbf{News}: embeddings and sentiment scores via \texttt{fetch\_news.py}, aggregated into fixed-size windows.
+  \item \textbf{Events}: earnings/dividends/splits via \texttt{fetch\_events.py}.
+  \item \textbf{Calendar \/ Static}: day-of-week/month encodings, sector tags, and static symbol features.
+\end{itemize}
+
+\paragraph{Causal Normalization and Leakage Prevention}
+Causal, volatility-aware normalization is implemented in \texttt{Hayson/baselines/dataModule.py} (method \texttt{mask\_normalize\_dataframe}), applying expanding-window statistics. In \texttt{unified\_tft\_pipeline.py}, validation loaders reuse \emph{training} normalization parameters and enforce a \textbf{21-day lookahead buffer} between the last training date and the first validation date, blocking any information leakage. Optional symbol holdout further prevents cross-sectional leakage.
+
+\subsection{Models}
+\subsubsection*{Classical ML}
+Ridge Regression, Random Forests, and XGBoost are trained on hand-crafted features. Their stability on low signal-to-noise daily returns provides strong baselines.
+
+\subsubsection*{Deep Learning (RNNs)}
+LSTM-based architectures (\texttt{Hayson/baselines/LSTM*}) ingest sequences of engineered factors. RNNs often capitalize on persistent autocorrelation and regime shifts with fewer parameters than transformers.
+
+\subsubsection*{Temporal Fusion Transformer (TFT)}
+Implemented in \texttt{Hayson/TFT/tft\_multimodal.py}, the TFT stacks VSN for feature-wise gating, GRNs for deep nonlinear processing, and multi-head attention for interpretable temporal focus. An Enhanced-TFT increases depth, adds residual gating, and conditionally encodes news via a \emph{NewsDownsampler} that fuses news with the final hidden state.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[node distance=8mm and 12mm, every node/.style={font=\small}]
+    % Inputs
+    \node[draw, rounded corners, fill=blue!8, minimum width=2.9cm, minimum height=1.1cm] (ohlc) {OHLCV\\+ Technicals};
+    \node[draw, rounded corners, fill=green!8, right=of ohlc, minimum width=2.7cm, minimum height=1.1cm] (macro) {Macro (FRED)};
+    \node[draw, rounded corners, fill=orange!10, right=of macro, minimum width=2.7cm, minimum height=1.1cm] (news) {News Embeddings\\+ Sentiment};
+    \node[draw, rounded corners, fill=purple!10, right=of news, minimum width=2.7cm, minimum height=1.1cm] (events) {Earnings \/ Events};
+
+    % Fusion
+    \node[draw, rounded corners, fill=gray!10, below=14mm of macro, minimum width=10cm, minimum height=1.2cm] (vsn) {Variable Selection Network (VSN) + Causal Normalization};
+
+    % Encoder / Attention / Decoder
+    \node[draw, rounded corners, fill=gray!10, below=9mm of vsn, minimum width=10cm, minimum height=1.2cm] (grn) {Gated Residual Networks (GRNs)};
+    \node[draw, rounded corners, fill=gray!10, below=9mm of grn, minimum width=10cm, minimum height=1.2cm] (attn) {Multi-Head Attention};
+    \node[draw, rounded corners, fill=gray!10, below=9mm of attn, minimum width=10cm, minimum height=1.2cm] (dec) {Decoder GRNs + NewsDownsampler Fusion};
+
+    % Output
+    \node[draw, rounded corners, fill=cyan!10, below=12mm of dec, minimum width=4.2cm, minimum height=1.2cm] (pred) {Next-Day Return Prediction};
+
+    % Arrows
+    \draw[-{Stealth}] (ohlc.south) |- (vsn.west);
+    \draw[-{Stealth}] (macro.south) -- (vsn.north);
+    \draw[-{Stealth}] (events.south) |- (vsn.east);
+    \draw[-{Stealth}] (news.south) |- (dec.east);
+    \draw[-{Stealth}] (vsn) -- (grn);
+    \draw[-{Stealth}] (grn) -- (attn);
+    \draw[-{Stealth}] (attn) -- (dec);
+    \draw[-{Stealth}] (dec) -- (pred);
+  \end{tikzpicture}
+  \caption{TFT-based multi-modal forecasting pipeline implemented in the repository.}
+\end{figure}
+
+\subsection{Experimental Configuration}
+We adopt daily frequency, encoder windows of 30--60 days, and one-step-ahead targets. Training uses AdamW with cosine annealing and gradient clipping. For honest validation, we use temporal splits with a 21-day gap and optional symbol holdout; validation loaders reuse training scalers to avoid leakage. All settings are configurable in \texttt{unified\_tft\_pipeline.py}.
+
+\subsection{Ablation Design}
+We vary both \emph{modalities} and \emph{model families}:
+\begin{itemize}[leftmargin=*]
+  \item Modalities: Full (OHLCV + technical + macro + news + events), \emph{No economic}, \emph{No news}, \emph{No technical}, and \emph{Only OHLCV}.
+  \item Models: Ridge, Random Forest, XGBoost, LSTM-based RNNs, and TFT/Enhanced-TFT.
+\end{itemize}
+Metrics include MSE, MAE, R$^2$, MAPE; trend metrics (directional accuracy, ROC-AUC); and finance metrics (annualized return of predicted path, Sharpe, and maximum drawdown). The trading simulator reports strategy vs benchmarks (DCA, buy-and-hold) and win rates.
+
+\subsection{Representative Results}
+Figure~\ref{fig:aapl-ablation} summarizes a representative single-stock ablation (AAPL). Where images are unavailable locally, a placeholder is rendered. Directional accuracy across models clustered near 0.53--0.59, with TFT not consistently surpassing LSTM baselines on daily horizons. R$^2$ on raw returns is typically near zero or negative, reflecting the well-known difficulty of point-return regression at daily cadence. Sharpe improvements appear for tree models under certain feature subsets, highlighting the value of nonparametric ensembles when signals are sparse.
+
+\begin{figure}[H]
+  \centering
+  % Place your image at figures/aapl_ablation_heatmap.png to auto-include.
+  \IfFileExists{figures/aapl_ablation_heatmap.png}{%
+    \includegraphics[width=0.98\textwidth]{figures/aapl_ablation_heatmap.png}%
+  }{%
+    \fbox{\parbox{0.95\textwidth}{\centering Placeholder for AAPL Ablation Heatmap\\(copy your figure to figures/aapl\_ablation\_heatmap.png)}}%
+  }
+  \caption{Ablation study heatmaps (R$^2$, directional accuracy, Sharpe) for AAPL across models and feature subsets.}
+  \label{fig:aapl-ablation}
+\end{figure}
+
+\subsection{Findings}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Model capacity vs data regime}: RNNs often outperformed TFT on daily single-step returns, likely due to fewer parameters and better bias--variance trade-offs in low SNR conditions.
+  \item \textbf{News impact}: News embeddings and sentiment aided specific market regimes but did not universally improve directional accuracy; their benefit increased when combined with robust normalization and longer context.
+  \item \textbf{Macro features}: Select macro time series improved stability and Sharpe by moderating exposure during risk-off regimes.
+  \item \textbf{Interpretability}: VSN weights and attention maps identified periods where technicals dominated vs. news/economic drivers, consistent with feature-group summaries produced by the pipeline.
+\end{itemize}
+
+\subsection{Portfolio Simulation}
+We evaluated utility via the included \texttt{TradingSimulator}, producing equity curves and summary reports (Sharpe, max drawdown, profit factor, and trade counts). Benchmarks include DCA and buy-and-hold. Example outputs in the repository demonstrate realistic, conservative performance expectations (e.g., modest Sharpe and sometimes underperformance to buy-and-hold)—a desired trait when leakage is eliminated and costs are not ignored.
+
+\subsection{Reproducibility}
+All experiments are reproducible with CLI commands such as:
+\begin{verbatim}
+python Hayson/TFT/unified_tft_pipeline.py --epochs 5 --symbols AAPL,MSFT
+python Hayson/TFT/unified_tft_pipeline.py --out-of-sample temporal --temporal-split 0.8
+\end{verbatim}
+Key code locations: data loaders and caching (\texttt{Hayson/TFT/dataModule}), TFT model (\texttt{tft\_multimodal.py}), training and analysis (\texttt{unified\_tft\_pipeline.py}).
+
+%------------------------------------------------------------------------------
+% Initiative II – Krackle
+%------------------------------------------------------------------------------
+\section{Initiative II: Krackle – Real-Time Smile Detection Web Game}
+\subsection{Motivation}
+Krackle explores affective computing in the browser: players trigger events by smiling, testing latency, robustness, and privacy of on-device CV.
+
+\subsection{System Architecture}
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[node distance=7mm and 10mm, every node/.style={font=\small}]
+    \node[draw, rounded corners, fill=blue!6, minimum width=3.2cm, minimum height=1.1cm] (cam) {User Camera (WebRTC)};
+    \node[draw, rounded corners, fill=orange!10, right=of cam, minimum width=3.6cm] (tfjs) {TF.js Face \/ Landmark \/ Smile Model};
+    \node[draw, rounded corners, fill=green!10, right=of tfjs, minimum width=3cm] (game) {Game Loop \\ (Canvas/WebGL)};
+    \node[draw, rounded corners, fill=gray!12, below=of game, minimum width=3.2cm] (ws) {WebSockets (Scores)};
+    \node[draw, rounded corners, fill=purple!10, left=of ws, minimum width=3.4cm] (django) {Django Backend \\ (Auth/Leaderboard)};
+    \node[draw, dashed, rounded corners, fill=gray!5, above=of tfjs, minimum width=5.2cm] (opencv) {Optional: OpenCV Server Inference};
+    \draw[-{Stealth}] (cam) -- (tfjs);
+    \draw[-{Stealth}] (tfjs) -- (game);
+    \draw[-{Stealth}] (game) -- (ws);
+    \draw[-{Stealth}] (ws) -- (django);
+    \draw[-{Stealth}, dashed] (cam) |- (opencv);
+    \draw[-{Stealth}, dashed] (opencv) -| (game);
+  \end{tikzpicture}
+  \caption{Krackle architecture: on-device TF.js inference, real-time game loop, and optional server-side fallback.}
+\end{figure}
+
+\subsection{Technology Stack}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Front-end}: JavaScript/TypeScript, WebGL, Canvas, TensorFlow.js models (MobileNet/MediaPipe/BlazeFace variants).
+  \item \textbf{Back-end}: Django (REST + templates), Channels (WebSockets) for live leaderboards; Redis for pub/sub.
+  \item \textbf{Computer Vision}: TF.js for on-device; Python OpenCV + dlib as optional server fallback (GPU if available).
+\end{itemize}
+
+\subsection{Face/Emotion Detection and Gameplay}
+Face boxes and landmarks are detected each frame; a smile score (mouth aspect ratio + classifier logit) triggers in-game events. Smoothing and hysteresis avoid flicker. The game awards points for sustained smiles, supports difficulty curves, and debounces over-sensitivity.
+
+\subsection{Privacy and Ethics}
+Default mode performs \emph{on-device} inference; raw frames never leave the browser. Only anonymized events (e.g., \texttt{"smile:on"}) and scores transit via WebSockets. Explicit consent dialogs describe data flow; no biometric templates are stored server-side. An accessibility mode permits keyboard-controlled play.
+
+\subsection{Deliverables}
+Working prototype, documentation, and demo instructions; optional public leaderboard can be disabled for private sessions.
+
+%------------------------------------------------------------------------------
+% Lessons, Limitations, and Future Work
+%------------------------------------------------------------------------------
+\section{Lessons Learned}
+\begin{itemize}[leftmargin=*]
+  \item Prevention of leakage (temporal gaps, shared scalers, symbol holdout) is essential; honest metrics are typically lower but credible.
+  \item Daily single-step returns are extremely noisy; classification of direction and risk-aware backtesting convey more utility than raw MSE.
+  \item On-device CV with TF.js provides excellent UX and privacy; careful thresholding and smoothing are key to robustness.
+\end{itemize}
+
+\section{Limitations and Future Work}
+\begin{itemize}[leftmargin=*]
+  \item Explore multi-horizon targets (1, 5, 10 days) and regime-aware training for TFT; consider contrastive pretraining for news embeddings.
+  \item Incorporate transaction costs and slippage in the trading simulator; expand to portfolio-level optimization and risk parity.
+  \item For Krackle, add federated learning for on-device personalization and evaluate differential privacy for telemetry.
+\end{itemize}
+
+\section{Conclusion}
+This internship delivered a robust research platform for multi-modal stock prediction and a novel real-time affective game. Empirical studies underscored that, under strict leakage controls, simpler sequence models (LSTMs) can outperform transformers on daily returns, while certain feature subsets (technicals, selective macro) improve risk-adjusted performance. Krackle demonstrated the feasibility of privacy-preserving, low-latency smile-driven interactions on the web.
+
+%------------------------------------------------------------------------------
+% References (examples – extend as needed)
+%------------------------------------------------------------------------------
+\section*{References}
+\begin{itemize}
+  \item Lim, B., et al. (2021). Temporal Fusion Transformers for Interpretable Multi-horizon Time Series Forecasting.
+  \item Vaswani, A., et al. (2017). Attention Is All You Need.
+  \item Repository documentation: \href{\repoLink}{\repoLink}
+\end{itemize}
+
+%------------------------------------------------------------------------------
+% Appendices (pull in existing .tex if present)
+%------------------------------------------------------------------------------
+\appendix
+\section{Implementation Roadmap}
+\IfFileExists{implementation_roadmap.tex}{\input{implementation_roadmap.tex}}{(Roadmap file not found in repository.)}
+
+\section{Research Timeline}
+\IfFileExists{research_timeline.tex}{\input{research_timeline.tex}}{(Timeline file not found in repository.)}
+
+\end{document}
