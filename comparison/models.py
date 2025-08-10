@@ -56,7 +56,9 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        x = x + self.pe[:, :x.size(1), :].to(x.device)
+        # Ensure positional encoding is on the same device as input
+        pe_slice = self.pe[:, :x.size(1), :].to(x.device)
+        x = x + pe_slice
         return self.dropout(x)
 
 class TransformerModel(nn.Module):

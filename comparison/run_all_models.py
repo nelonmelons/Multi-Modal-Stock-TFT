@@ -14,10 +14,9 @@ from main import LeakageFreeDataLoader
 from models import LSTMModel, GRUModel, TransformerModel, TFT
 from train import train_model, get_predictions, train_tft_model
 from model.tft_model import setup_device
-from portfolio import run_portfolio_simulation
 from evaluation import evaluate_multi_horizon_predictions, create_horizon_comparison_table
 from plotting import (create_results_directory, plot_training_curves, plot_prediction_samples, 
-                     plot_horizon_comparison_heatmap, plot_error_distribution, plot_portfolio_performance,
+                     plot_horizon_comparison_heatmap, plot_error_distribution,
                      save_all_artifacts, create_comprehensive_plots, save_evaluation_artifacts)
 from baseline_models import DeepLearningExperimentRunner
 from enhanced_plotting import EnhancedPlottingManager
@@ -45,7 +44,7 @@ def get_model_summary(model_name, model_instance):
     
     return summary
 
-def filter_features_by_type(X_data, feature_df, filter_type, news_dim=0):
+def filter_features_by_type(X_data, feature_df, filter_type, news_dim=0, debug=False):
     """
     Filter features based on the specified filter type.
     
@@ -54,12 +53,14 @@ def filter_features_by_type(X_data, feature_df, filter_type, news_dim=0):
         feature_df: Feature dataframe with column information
         filter_type: Type of filtering to apply
         news_dim: Number of news features
+        debug: Whether to print debug information
     
     Returns:
         Filtered X_data and corresponding feature indices
     """
     if feature_df is None:
-        print(f"⚠️  No feature information available for {filter_type}, using all features")
+        if debug:
+            print(f"⚠️  No feature information available for {filter_type}, using all features")
         return X_data, list(range(X_data.shape[-1]))
     
     # Get feature column names (excluding target and metadata columns)
@@ -70,18 +71,20 @@ def filter_features_by_type(X_data, feature_df, filter_type, news_dim=0):
     # Ensure we don't exceed the actual data dimensions
     actual_feature_count = X_data.shape[-1]
     if len(feature_cols) > actual_feature_count:
-        print(f"⚠️  Feature DataFrame has {len(feature_cols)} columns but data has {actual_feature_count} features")
+        if debug:
+            print(f"⚠️  Feature DataFrame has {len(feature_cols)} columns but data has {actual_feature_count} features")
         feature_cols = feature_cols[:actual_feature_count]
     
-    print(f"   Total available features in data: {actual_feature_count}")
-    print(f"   Feature columns to consider: {len(feature_cols)}")
-    
-    print(f"\n   📋 FEATURE FILTERING EXPLANATION:")
-    print(f"      • Total tensor features: {actual_feature_count}")
-    print(f"      • Feature DataFrame columns: {len(feature_cols)} (may include metadata)")
-    print(f"      • Filter type: '{filter_type}'")
-    print(f"      • Goal: Select subset of features based on data type")
-    print()
+    if debug:
+        print(f"   Total available features in data: {actual_feature_count}")
+        print(f"   Feature columns to consider: {len(feature_cols)}")
+        
+        print(f"\n   📋 FEATURE FILTERING EXPLANATION:")
+        print(f"      • Total tensor features: {actual_feature_count}")
+        print(f"      • Feature DataFrame columns: {len(feature_cols)} (may include metadata)")
+        print(f"      • Filter type: '{filter_type}'")
+        print(f"      • Goal: Select subset of features based on data type")
+        print()
     
     if filter_type == "no_news":
         # Remove news features (embeddings and sentiment)
@@ -90,37 +93,38 @@ def filter_features_by_type(X_data, feature_df, filter_type, news_dim=0):
         selected_cols = [col for col in feature_cols 
                         if not (col.startswith('emb_') or col == 'sentiment_score')]
         
-        print(f"   📰 NEWS FEATURES IDENTIFIED ({len(news_features)} total):")
-        if len(news_features) <= 10:
-            print(f"      {news_features}")
-        else:
-            print(f"      First 5: {news_features[:5]}")
-            print(f"      Last 5: {news_features[-5:]}")
-            print(f"      (and {len(news_features)-10} more embedding dimensions)")
-        
-        print(f"   ✅ REMAINING FEATURES ({len(selected_cols)} total):")
-        remaining_by_type = {
-            'price': [col for col in selected_cols if any(pf in col.lower() for pf in ['open', 'high', 'low', 'close', 'volume', 'adjusted'])],
-            'technical': [col for col in selected_cols if col.startswith('ta_') or any(ind in col.lower() for ind in ['sma', 'ema', 'rsi', 'macd', 'bb'])],
-            'economic': [col for col in selected_cols if any(econ in col.lower() for econ in ['cpi', 'fedfunds', 'unrate', 't10y2y', 'gdp', 'vix', 'dxy', 'oil'])],
-            'other': []
-        }
-        
-        # Categorize remaining features
-        categorized = set()
-        for category_features in remaining_by_type.values():
-            categorized.update(category_features)
-        remaining_by_type['other'] = [col for col in selected_cols if col not in categorized]
-        
-        for category, features in remaining_by_type.items():
-            if features:
-                print(f"      {category.capitalize()}: {len(features)} features")
-                if len(features) <= 5:
-                    print(f"        → {features}")
-                else:
-                    print(f"        → {features[:3]} ... {features[-2:]}")
-        
-        print(f"   ❌ FILTERED OUT: {len(news_features)} news features removed")
+        if debug:
+            print(f"   📰 NEWS FEATURES IDENTIFIED ({len(news_features)} total):")
+            if len(news_features) <= 10:
+                print(f"      {news_features}")
+            else:
+                print(f"      First 5: {news_features[:5]}")
+                print(f"      Last 5: {news_features[-5:]}")
+                print(f"      (and {len(news_features)-10} more embedding dimensions)")
+            
+            print(f"   ✅ REMAINING FEATURES ({len(selected_cols)} total):")
+            remaining_by_type = {
+                'price': [col for col in selected_cols if any(pf in col.lower() for pf in ['open', 'high', 'low', 'close', 'volume', 'adjusted'])],
+                'technical': [col for col in selected_cols if col.startswith('ta_') or any(ind in col.lower() for ind in ['sma', 'ema', 'rsi', 'macd', 'bb'])],
+                'economic': [col for col in selected_cols if any(econ in col.lower() for econ in ['cpi', 'fedfunds', 'unrate', 't10y2y', 'gdp', 'vix', 'dxy', 'oil'])],
+                'other': []
+            }
+            
+            # Categorize remaining features
+            categorized = set()
+            for category_features in remaining_by_type.values():
+                categorized.update(category_features)
+            remaining_by_type['other'] = [col for col in selected_cols if col not in categorized]
+            
+            for category, features in remaining_by_type.items():
+                if features:
+                    print(f"      {category.capitalize()}: {len(features)} features")
+                    if len(features) <= 5:
+                        print(f"        → {features}")
+                    else:
+                        print(f"        → {features[:3]} ... {features[-2:]}")
+            
+            print(f"   ❌ FILTERED OUT: {len(news_features)} news features removed")
         
     elif filter_type == "no_economic":
         # Remove economic (FRED) features
@@ -130,9 +134,10 @@ def filter_features_by_type(X_data, feature_df, filter_type, news_dim=0):
         selected_cols = [col for col in feature_cols 
                         if not any(econ_feat in col.lower() for econ_feat in economic_features)]
         
-        print(f"   🏦 ECONOMIC FEATURES REMOVED ({len(econ_cols)} total): {econ_cols}")
-        print(f"   ✅ REMAINING FEATURES: {len(selected_cols)} features")
-        print(f"   ❌ FILTERED OUT: {len(econ_cols)} economic features removed")
+        if debug:
+            print(f"   🏦 ECONOMIC FEATURES REMOVED ({len(econ_cols)} total): {econ_cols}")
+            print(f"   ✅ REMAINING FEATURES: {len(selected_cols)} features")
+            print(f"   ❌ FILTERED OUT: {len(econ_cols)} economic features removed")
         
     elif filter_type == "price_only":
         # Only basic price features
@@ -140,16 +145,17 @@ def filter_features_by_type(X_data, feature_df, filter_type, news_dim=0):
         selected_cols = [col for col in feature_cols if any(pf in col.lower() for pf in price_features)]
         excluded_cols = [col for col in feature_cols if col not in selected_cols]
         
-        print(f"   💰 PRICE FEATURES SELECTED ({len(selected_cols)} total): {selected_cols}")
-        print(f"   ❌ EXCLUDED FEATURES ({len(excluded_cols)} total):")
-        excluded_by_type = {
-            'news': [col for col in excluded_cols if col.startswith('emb_') or col == 'sentiment_score'],
-            'technical': [col for col in excluded_cols if col.startswith('ta_') or any(ind in col.lower() for ind in ['sma', 'ema', 'rsi', 'macd', 'bb'])],
-            'economic': [col for col in excluded_cols if any(econ in col.lower() for econ in ['cpi', 'fedfunds', 'unrate', 't10y2y', 'gdp', 'vix', 'dxy', 'oil'])],
-        }
-        for category, features in excluded_by_type.items():
-            if features:
-                print(f"      {category}: {len(features)} features excluded")
+        if debug:
+            print(f"   💰 PRICE FEATURES SELECTED ({len(selected_cols)} total): {selected_cols}")
+            print(f"   ❌ EXCLUDED FEATURES ({len(excluded_cols)} total):")
+            excluded_by_type = {
+                'news': [col for col in excluded_cols if col.startswith('emb_') or col == 'sentiment_score'],
+                'technical': [col for col in excluded_cols if col.startswith('ta_') or any(ind in col.lower() for ind in ['sma', 'ema', 'rsi', 'macd', 'bb'])],
+                'economic': [col for col in excluded_cols if any(econ in col.lower() for econ in ['cpi', 'fedfunds', 'unrate', 't10y2y', 'gdp', 'vix', 'dxy', 'oil'])],
+            }
+            for category, features in excluded_by_type.items():
+                if features:
+                    print(f"      {category}: {len(features)} features excluded")
         
     elif filter_type == "technical_only":
         # Only technical indicators (these start with 'ta_' based on the codebase)
@@ -158,12 +164,13 @@ def filter_features_by_type(X_data, feature_df, filter_type, news_dim=0):
                         for indicator in ['sma', 'ema', 'rsi', 'macd', 'bb', 'atr', 'obv'])]
         excluded_cols = [col for col in feature_cols if col not in selected_cols]
         
-        print(f"   📊 TECHNICAL FEATURES SELECTED ({len(selected_cols)} total):")
-        if len(selected_cols) <= 10:
-            print(f"      {selected_cols}")
-        else:
-            print(f"      {selected_cols[:5]} ... {selected_cols[-5:]}")
-        print(f"   ❌ EXCLUDED: {len(excluded_cols)} features (price, news, economic)")
+        if debug:
+            print(f"   📊 TECHNICAL FEATURES SELECTED ({len(selected_cols)} total):")
+            if len(selected_cols) <= 10:
+                print(f"      {selected_cols}")
+            else:
+                print(f"      {selected_cols[:5]} ... {selected_cols[-5:]}")
+            print(f"   ❌ EXCLUDED: {len(excluded_cols)} features (price, news, economic)")
         
     elif filter_type == "price_technical":
         # Price + technical indicators (exclude news and economic features)
@@ -182,32 +189,35 @@ def filter_features_by_type(X_data, feature_df, filter_type, news_dim=0):
         news_excluded = [col for col in excluded_cols if col.startswith('emb_') or col == 'sentiment_score']
         econ_excluded = [col for col in excluded_cols if any(econ in col.lower() for econ in ['cpi', 'fedfunds', 'unrate', 't10y2y', 'gdp', 'vix', 'dxy', 'oil'])]
         
-        print(f"   💰 PRICE FEATURES INCLUDED ({len(price_cols)}): {price_cols}")
-        print(f"   📊 TECHNICAL FEATURES INCLUDED ({len(tech_cols)}): {tech_cols[:5]}{'...' if len(tech_cols) > 5 else ''}")
-        print(f"   ❌ EXCLUDED - News: {len(news_excluded)}, Economic: {len(econ_excluded)}")
-        print(f"   ✅ TOTAL SELECTED: {len(selected_cols)} features")
+        if debug:
+            print(f"   💰 PRICE FEATURES INCLUDED ({len(price_cols)}): {price_cols}")
+            print(f"   📊 TECHNICAL FEATURES INCLUDED ({len(tech_cols)}): {tech_cols[:5]}{'...' if len(tech_cols) > 5 else ''}")
+            print(f"   ❌ EXCLUDED - News: {len(news_excluded)}, Economic: {len(econ_excluded)}")
+            print(f"   ✅ TOTAL SELECTED: {len(selected_cols)} features")
         
     else:
         # Use all features
         selected_cols = feature_cols
-        print(f"   ✅ USING ALL FEATURES: {len(selected_cols)} features")
         
-        # Show breakdown of all features by type
-        all_by_type = {
-            'news': [col for col in feature_cols if col.startswith('emb_') or col == 'sentiment_score'],
-            'price': [col for col in feature_cols if any(pf in col.lower() for pf in ['open', 'high', 'low', 'close', 'volume', 'adjusted'])],
-            'technical': [col for col in feature_cols if col.startswith('ta_') or any(ind in col.lower() for ind in ['sma', 'ema', 'rsi', 'macd', 'bb'])],
-            'economic': [col for col in feature_cols if any(econ in col.lower() for econ in ['cpi', 'fedfunds', 'unrate', 't10y2y', 'gdp', 'vix', 'dxy', 'oil'])],
-        }
-        
-        categorized_all = set()
-        for category_features in all_by_type.values():
-            categorized_all.update(category_features)
-        all_by_type['other'] = [col for col in feature_cols if col not in categorized_all]
-        
-        for category, features in all_by_type.items():
-            if features:
-                print(f"      {category.capitalize()}: {len(features)} features")
+        if debug:
+            print(f"   ✅ USING ALL FEATURES: {len(selected_cols)} features")
+            
+            # Show breakdown of all features by type
+            all_by_type = {
+                'news': [col for col in feature_cols if col.startswith('emb_') or col == 'sentiment_score'],
+                'price': [col for col in feature_cols if any(pf in col.lower() for pf in ['open', 'high', 'low', 'close', 'volume', 'adjusted'])],
+                'technical': [col for col in feature_cols if col.startswith('ta_') or any(ind in col.lower() for ind in ['sma', 'ema', 'rsi', 'macd', 'bb'])],
+                'economic': [col for col in feature_cols if any(econ in col.lower() for econ in ['cpi', 'fedfunds', 'unrate', 't10y2y', 'gdp', 'vix', 'dxy', 'oil'])],
+            }
+            
+            categorized_all = set()
+            for category_features in all_by_type.values():
+                categorized_all.update(category_features)
+            all_by_type['other'] = [col for col in feature_cols if col not in categorized_all]
+            
+            for category, features in all_by_type.items():
+                if features:
+                    print(f"      {category.capitalize()}: {len(features)} features")
     
     # Get indices of selected columns, ensuring they're within bounds
     selected_indices = []
@@ -217,10 +227,12 @@ def filter_features_by_type(X_data, feature_df, filter_type, news_dim=0):
     
     # Ensure we have valid indices
     if not selected_indices:
-        print(f"⚠️  No valid feature indices found, using first {min(6, actual_feature_count)} features as fallback")
+        if debug:
+            print(f"⚠️  No valid feature indices found, using first {min(6, actual_feature_count)} features as fallback")
         selected_indices = list(range(min(6, actual_feature_count)))
     
-    print(f"   Selected feature indices: {len(selected_indices)} indices")
+    if debug:
+        print(f"   Selected feature indices: {len(selected_indices)} indices")
     
     # Filter the data
     try:
@@ -229,11 +241,13 @@ def filter_features_by_type(X_data, feature_df, filter_type, news_dim=0):
         elif len(X_data.shape) == 2:  # (batch, features)
             filtered_X = X_data[:, selected_indices]
         else:
-            print(f"⚠️  Unexpected data shape: {X_data.shape}, using original data")
+            if debug:
+                print(f"⚠️  Unexpected data shape: {X_data.shape}, using original data")
             filtered_X = X_data
             selected_indices = list(range(X_data.shape[-1]))
         
-        print(f"   Data shape changed from {X_data.shape} to {filtered_X.shape}")
+        if debug:
+            print(f"   Data shape changed from {X_data.shape} to {filtered_X.shape}")
         return filtered_X, selected_indices
         
     except IndexError as e:
@@ -424,7 +438,6 @@ def run_pipeline():
     # Create results directory for this experiment
     results_dir = create_results_directory()
     
-    all_results = {}
     all_evaluation_results = {}
     all_training_histories = {}
     horizons_to_evaluate = [1, 5, 10, 15, 20]
@@ -510,7 +523,7 @@ def run_pipeline():
             
             # Get a sample batch to determine filtered dimensions
             sample_batch = next(iter(data_module.train_loader))
-            sample_features, _ = filter_features_by_type(sample_batch[0].numpy(), feature_df, filter_type, news_dim)
+            sample_features, _ = filter_features_by_type(sample_batch[0].numpy(), feature_df, filter_type, news_dim, debug=True)
             filtered_input_dim = sample_features.shape[-1]
             
             print(f"   Original input dim: {input_dim}, Filtered input dim: {filtered_input_dim}")
@@ -535,13 +548,13 @@ def run_pipeline():
             # Get raw data and apply filtering
             train_features_list, train_targets_list = [], []
             for features, targets in data_module.train_loader:
-                filtered_features, _ = filter_features_by_type(features.numpy(), feature_df, filter_type, news_dim)
+                filtered_features, _ = filter_features_by_type(features.numpy(), feature_df, filter_type, news_dim, debug=False)
                 train_features_list.append(torch.FloatTensor(filtered_features).to(config['device']))
                 train_targets_list.append(targets.to(config['device']))
             
             val_features_list, val_targets_list = [], []
             for features, targets in data_module.val_loader:
-                filtered_features, _ = filter_features_by_type(features.numpy(), feature_df, filter_type, news_dim)
+                filtered_features, _ = filter_features_by_type(features.numpy(), feature_df, filter_type, news_dim, debug=False)
                 val_features_list.append(torch.FloatTensor(filtered_features).to(config['device']))
                 val_targets_list.append(targets.to(config['device']))
             
@@ -598,21 +611,7 @@ def run_pipeline():
                 'date': [pd.to_datetime(config['start_date'])]
             })
 
-        print(f"\n--- Simulating Portfolio for {model_name} ---")
-        if predictions_df is not None:
-            portfolio_results = run_portfolio_simulation(predictions_df, val_df)
-            all_results[model_name] = portfolio_results
-            print(f"✅ {model_name} evaluation complete.")
-        else:
-            print(f"❌ No predictions generated for {model_name}")
-            all_results[model_name] = {
-                'final_capital': 10000,
-                'sharpe_ratio': 0.0,
-                'max_drawdown': 0.0,
-                'win_rate': 0.0,
-                'avg_gain': 0.0,
-                'avg_loss': 0.0
-            }
+        print(f"✅ {model_name} evaluation complete.")
         
         # Clean up GPU memory after each model if using CUDA
         if config['device'].type == 'cuda':
@@ -632,57 +631,26 @@ def run_pipeline():
     else:
         print("No evaluation results available for horizon analysis.")
     
-    print("\n\n" + "="*80)
-    print("🏆 FINAL MODEL COMPARISON RESULTS")
-    print("="*80)
-
-    table = PrettyTable()
-    table.field_names = [
-        "Model", "Final Capital", "Sharpe Ratio", "Max Drawdown", 
-        "Win Rate (%)", "Avg Gain (%)", "Avg Loss (%)"
-    ]
-    # Set alignment for all columns to right
-    for field in table.field_names:
-        table.align[field] = "r"
-    # Set model column to left alignment
-    table.align["Model"] = "l"
-    table.float_format = ".4"
-
-    for model_name, results in all_results.items():
-        table.add_row([
-            model_name,
-            f"${results['final_capital']:,.2f}",
-            results['sharpe_ratio'],
-            f"{results['max_drawdown']:.2%}",
-            f"{results['win_rate'] * 100:.2f}",
-            f"{results['avg_gain'] * 100:.2f}",
-            f"{results['avg_loss'] * 100:.2f}"
-        ])
-    
-    print(table)
-    portfolio_table_str = str(table)
-    
     # --- 6. Generate All Plots and Save Artifacts ---
     print("\n\n" + "="*80)
     print("📈 GENERATING COMPREHENSIVE VISUALIZATIONS AND SAVING ARTIFACTS")
     print("="*80)
     
     # Generate comprehensive plots with enhanced visualizations
-    create_comprehensive_plots(all_results, all_evaluation_results, all_training_histories, results_dir)
+    create_comprehensive_plots({}, all_evaluation_results, all_training_histories, results_dir)
     
     # Generate legacy plots for compatibility
     plot_training_curves(all_training_histories, results_dir)
     plot_prediction_samples(all_evaluation_results, results_dir)
     plot_horizon_comparison_heatmap(all_evaluation_results, horizons_to_evaluate, results_dir)
     plot_error_distribution(all_evaluation_results, results_dir)
-    plot_portfolio_performance(all_results, results_dir)
     
     # Save evaluation artifacts with detailed tables
-    save_evaluation_artifacts(all_evaluation_results, all_results, horizons_to_evaluate, results_dir)
+    save_evaluation_artifacts(all_evaluation_results, {}, horizons_to_evaluate, results_dir)
     
     # Save all artifacts
-    save_all_artifacts(all_evaluation_results, all_results, horizon_table_str, 
-                      portfolio_table_str, config, results_dir)
+    save_all_artifacts(all_evaluation_results, {}, horizon_table_str, 
+                      "", config, results_dir)
     
     print(f"\n🎉 Pipeline completed successfully!")
     print(f"📁 All results saved to: {results_dir}")

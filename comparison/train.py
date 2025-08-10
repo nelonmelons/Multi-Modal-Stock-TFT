@@ -49,7 +49,20 @@ def train_model(model, data_module, epochs=20, lr=0.001, device=None):
             optimizer.zero_grad()
             outputs = model(features)
             loss = criterion(outputs, targets)
+            
+            # Check for NaN or infinite loss
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"⚠️  Warning: NaN or infinite loss detected in epoch {epoch+1}")
+                print(f"   Features shape: {features.shape}, Outputs shape: {outputs.shape}")
+                print(f"   Features range: [{features.min():.6f}, {features.max():.6f}]")
+                print(f"   Outputs range: [{outputs.min():.6f}, {outputs.max():.6f}]")
+                continue  # Skip this batch
+            
             loss.backward()
+            
+            # Gradient clipping to prevent exploding gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
             
             train_loss += loss.item()
