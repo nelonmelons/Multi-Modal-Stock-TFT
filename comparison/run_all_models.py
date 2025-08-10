@@ -14,25 +14,14 @@ from models import LSTMModel, GRUModel, TransformerModel, TFT
 from train import train_model, get_predictions, train_tft_model
 from model.tft_model import setup_device
 from portfolio import run_portfolio_simulation
-from evaluation import evaluate_multi_horizon_predictions, evaluate_sklearn_multi_horizon, create_horizon_comparison_table
+from evaluation import evaluate_multi_horizon_predictions, create_horizon_comparison_table
 from plotting import (create_results_directory, plot_training_curves, plot_prediction_samples, 
                      plot_horizon_comparison_heatmap, plot_error_distribution, plot_portfolio_performance,
                      save_all_artifacts, create_comprehensive_plots, save_evaluation_artifacts)
-from baseline_models import BaselineExperimentRunner
+from baseline_models import DeepLearningExperimentRunner
 from enhanced_plotting import EnhancedPlottingManager
-from sklearn.linear_model import Ridge
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-import xgboost as xgb
-import lightgbm as lgb
-from statsmodels.tsa.arima.model import ARIMA
-from statsmodels.tools.sm_exceptions import ConvergenceWarning
 import warnings
 import torch
-import xgboost as xgb
-import lightgbm as lgb
-from statsmodels.tsa.arima.model import ARIMA
-import warnings
 warnings.filterwarnings('ignore')
 
 def create_empty_detailed_predictions_df():
@@ -40,16 +29,14 @@ def create_empty_detailed_predictions_df():
     return pd.DataFrame(columns=['symbol', 'date', 'actual', 'prediction', 'horizon', 'squared_error', 'absolute_error'])
 
 def get_model_summary(model_name, model_instance):
-    """Returns a brief summary of the model."""
+    """Returns a brief summary of the deep learning model."""
     summaries = {
         "LSTM": "A standard Long Short-Term Memory network, good for capturing sequential patterns.",
         "GRU": "A Gated Recurrent Unit network, similar to LSTM but with a simpler architecture.",
-        "Transformer": "A model using "
-        "self-attention mechanisms to weigh the importance of different past data points.",
-        "TFT": "A complex Temporal Fusion Transformer designed to handle diverse features and temporal hierarchies.",
-        "Ridge": "A classical linear regression model with L2 regularization to prevent overfitting."
+        "Transformer": "A model using self-attention mechanisms to weigh the importance of different past data points.",
+        "TFT": "A complex Temporal Fusion Transformer designed to handle diverse features and temporal hierarchies."
     }
-    summary = summaries.get(model_name, "A machine learning model.")
+    summary = summaries.get(model_name, "A deep learning model for time series prediction.")
     
     if hasattr(model_instance, 'parameters'):
         total_params = sum(p.numel() for p in model_instance.parameters() if p.requires_grad)
@@ -352,12 +339,6 @@ def run_pipeline():
     
     print(f"   Input dimension: {input_dim}, News dimension: {news_dim}")
     
-    # Import additional models for comprehensive comparison
-    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-    from sklearn.linear_model import Lasso, ElasticNet
-    from sklearn.svm import SVR
-    from sklearn.neural_network import MLPRegressor
-    
     models_to_run = {
         # === Neural Network Models (PyTorch) ===
         "LSTM_Full": {
@@ -423,121 +404,6 @@ def run_pipeline():
             "model_class": TFT,
             "model_params": {"news_dim": 0, "hidden_size": 64, "num_heads": 4, "dropout": 0.1, "prediction_len": config['predict_len']},
             "description": "TFT with only price and technical indicators (no news or economic data)."
-        },
-        
-        # === Traditional ML Models with Different Feature Sets ===
-        "Ridge_Full": {
-            "type": "sklearn",
-            "model": Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=1.0))]),
-            "description": "Ridge regression with all available features."
-        },
-        "Ridge_No_News": {
-            "type": "sklearn_no_news",
-            "model": Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=1.0))]),
-            "description": "Ridge regression without news features."
-        },
-        "Ridge_Price_Only": {
-            "type": "sklearn_price_only",
-            "model": Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=1.0))]),
-            "description": "Ridge regression with only basic price features."
-        },
-        
-        "Lasso_Full": {
-            "type": "sklearn",
-            "model": Pipeline([('scaler', StandardScaler()), ('lasso', Lasso(alpha=0.1))]),
-            "description": "Lasso regression with automatic feature selection on all features."
-        },
-        "Lasso_No_News": {
-            "type": "sklearn_no_news",
-            "model": Pipeline([('scaler', StandardScaler()), ('lasso', Lasso(alpha=0.1))]),
-            "description": "Lasso regression without news features."
-        },
-        
-        "ElasticNet_Full": {
-            "type": "sklearn",
-            "model": Pipeline([('scaler', StandardScaler()), ('elastic', ElasticNet(alpha=0.1, l1_ratio=0.5))]),
-            "description": "ElasticNet combining Ridge and Lasso regularization with all features."
-        },
-        
-        # === Tree-Based Models ===
-        "RandomForest_Full": {
-            "type": "sklearn",
-            "model": RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1),
-            "description": "Random Forest with all available features for robust ensemble prediction."
-        },
-        "RandomForest_No_News": {
-            "type": "sklearn_no_news",
-            "model": RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1),
-            "description": "Random Forest without news features."
-        },
-        "RandomForest_Technical": {
-            "type": "sklearn_technical_only",
-            "model": RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1),
-            "description": "Random Forest with only technical indicators."
-        },
-        
-        "XGBoost_Full": {
-            "type": "sklearn",
-            "model": xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42),
-            "description": "XGBoost with all features for gradient boosting optimization."
-        },
-        "XGBoost_No_News": {
-            "type": "sklearn_no_news",
-            "model": xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42),
-            "description": "XGBoost without news features."
-        },
-        "XGBoost_No_Economic": {
-            "type": "sklearn_no_economic",
-            "model": xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42),
-            "description": "XGBoost without economic (FRED) features."
-        },
-        
-        "LightGBM_Full": {
-            "type": "sklearn", 
-            "model": lgb.LGBMRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42, verbose=-1),
-            "description": "LightGBM with all features for fast gradient boosting."
-        },
-        "LightGBM_No_News": {
-            "type": "sklearn_no_news",
-            "model": lgb.LGBMRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42, verbose=-1),
-            "description": "LightGBM without news features."
-        },
-        
-        "GradientBoosting_Full": {
-            "type": "sklearn",
-            "model": GradientBoostingRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42),
-            "description": "Scikit-learn Gradient Boosting with all features."
-        },
-        
-        # === Support Vector Machines ===
-        "SVR_Full": {
-            "type": "sklearn",
-            "model": Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, gamma='scale'))]),
-            "description": "Support Vector Regression with RBF kernel and all features."
-        },
-        "SVR_No_News": {
-            "type": "sklearn_no_news",
-            "model": Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, gamma='scale'))]),
-            "description": "SVR without news features."
-        },
-        
-        # === Neural Networks (Scikit-learn) ===
-        "MLP_Full": {
-            "type": "sklearn",
-            "model": Pipeline([('scaler', StandardScaler()), ('mlp', MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42))]),
-            "description": "Multi-layer Perceptron with all features."
-        },
-        "MLP_No_News": {
-            "type": "sklearn_no_news",
-            "model": Pipeline([('scaler', StandardScaler()), ('mlp', MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42))]),
-            "description": "MLP without news features."
-        },
-        
-        # === Time Series Models ===
-        "ARIMA": {
-            "type": "arima",
-            "model": None,  # ARIMA models will be created per symbol
-            "description": "Classical ARIMA time series model using only price history."
         }
     }
 
@@ -703,176 +569,12 @@ def run_pipeline():
             eval_results = evaluate_multi_horizon_predictions(trained_model, filtered_data_module, horizons_to_evaluate)
             all_evaluation_results[model_name] = eval_results
 
-        elif model_type == "sklearn":
-            print(f"\n--- Training {model_name} (Scikit-learn) ---")
-            model.fit(X_train_flat, y_train_flat)
-            all_training_histories[model_name] = {}  # Sklearn models don't have training curves
-            
-            print(f"\n--- Generating Predictions for {model_name} ---")
-            predictions = model.predict(X_val_flat)
-            
-            # Add small model-specific noise to differentiate models in portfolio simulation
-            np.random.seed(hash(model_name) % 2**32)  # Reproducible seed based on model name
-            noise_factor = 1e-6  # Very small noise
-            noise = np.random.normal(0, noise_factor, len(predictions))
-            predictions_with_noise = predictions + noise
-            
-            # Reshape predictions to match portfolio simulation expectations
-            # We only predict the first step, so we'll repeat it for the horizon
-            predictions_multi_step = np.tile(predictions_with_noise[:, np.newaxis], (1, config['predict_len']))
-            
-            # Create predictions dataframe with proper format for portfolio simulation
-            val_size = len(predictions_with_noise)
-            
-            # Create individual rows for each prediction
-            prediction_rows = []
-            symbols = config['symbols']
-            start_date = pd.to_datetime(config['start_date'])
-            
-            for i in range(val_size):
-                # Create realistic date progression
-                date = start_date + pd.Timedelta(days=i)
-                symbol = symbols[i % len(symbols)]  # Cycle through symbols
-                
-                # Use the first step prediction as the main prediction value
-                pred_value = float(predictions_with_noise[i]) if hasattr(predictions_with_noise[i], '__float__') else float(predictions_with_noise[i][0] if hasattr(predictions_with_noise[i], '__len__') else predictions_with_noise[i])
-                
-                prediction_rows.append({
-                    'date': date,
-                    'symbol': symbol,
-                    'prediction': pred_value  # Single numeric value, not a list
-                })
-            
-            predictions_df = pd.DataFrame(prediction_rows)
-            
-            print(f"\n--- Evaluating Multi-Horizon Performance for {model_name} ---")
-            eval_results = evaluate_sklearn_multi_horizon(model, X_val_flat, y_val, val_df, horizons_to_evaluate)
-            all_evaluation_results[model_name] = eval_results
 
-        # === New sklearn model types with feature filtering ===
-        elif model_type in ["sklearn_no_news", "sklearn_no_economic", "sklearn_price_only", "sklearn_technical_only"]:
-            print(f"\n--- Training {model_name} (Scikit-learn with filtered features) ---")
-            
-            # Get feature information for filtering
-            feature_df = data_loader.processed_data.get('features', None)
-            
-            # Determine filter type
-            if "no_news" in model_type:
-                filter_type = "no_news"
-            elif "no_economic" in model_type:
-                filter_type = "no_economic"
-            elif "price_only" in model_type:
-                filter_type = "price_only"
-            elif "technical_only" in model_type:
-                filter_type = "technical_only"
-            else:
-                filter_type = "all"
-            
-            print(f"   Applying feature filter: {filter_type}")
-            
-            # Filter training and validation data
-            X_train_filtered, train_indices = filter_features_by_type(X_train_flat, feature_df, filter_type, news_dim)
-            X_val_filtered, val_indices = filter_features_by_type(X_val_flat, feature_df, filter_type, news_dim)
-            
-            # Train model with filtered features
-            model.fit(X_train_filtered, y_train_flat)
-            all_training_histories[model_name] = {}  # Sklearn models don't have training curves
-            
-            print(f"\n--- Generating Predictions for {model_name} ---")
-            predictions = model.predict(X_val_filtered)
-            
-            # Add small model-specific noise to differentiate models in portfolio simulation
-            # This is realistic because different models will have slight differences even with same data
-            np.random.seed(hash(model_name) % 2**32)  # Reproducible seed based on model name
-            noise_factor = 1e-6  # Very small noise
-            noise = np.random.normal(0, noise_factor, len(predictions))
-            predictions_with_noise = predictions + noise
-            
-            # Create predictions dataframe with proper format for portfolio simulation
-            val_size = len(predictions_with_noise)
-            prediction_rows = []
-            symbols = config['symbols']
-            start_date = pd.to_datetime(config['start_date'])
-            
-            for i in range(val_size):
-                date = start_date + pd.Timedelta(days=i)
-                symbol = symbols[i % len(symbols)]
-                pred_value = float(predictions_with_noise[i]) if hasattr(predictions_with_noise[i], '__float__') else float(predictions_with_noise[i][0] if hasattr(predictions_with_noise[i], '__len__') else predictions_with_noise[i])
-                
-                prediction_rows.append({
-                    'date': date,
-                    'symbol': symbol,
-                    'prediction': pred_value
-                })
-            
-            predictions_df = pd.DataFrame(prediction_rows)
-            
-            print(f"\n--- Evaluating Multi-Horizon Performance for {model_name} ---")
-            eval_results = evaluate_sklearn_multi_horizon(model, X_val_filtered, y_val, val_df, horizons_to_evaluate)
-            all_evaluation_results[model_name] = eval_results
 
-        elif model_type == "arima":
-            print(f"\n--- Training {model_name} (ARIMA) ---")
-            all_training_histories[model_name] = {}  # ARIMA doesn't have training curves
-            # ARIMA requires time series data, we'll use the first target column
-            predictions_list = []
-            
-            # Get validation data for ARIMA
-            val_df_for_arima = data_loader.val_df if hasattr(data_loader, 'val_df') else None
-            
-            if val_df_for_arima is not None:
-                for symbol in config['symbols']:
-                    symbol_data = val_df_for_arima[val_df_for_arima['symbol'] == symbol]
-                    if len(symbol_data) > 0:
-                        # Use closing price for ARIMA
-                        ts_data = symbol_data['close'].values
-                        
-                        if len(ts_data) >= 10:  # Need minimum data for ARIMA
-                            try:
-                                # Fit ARIMA model
-                                arima_model = ARIMA(ts_data[:len(ts_data)//2], order=(1,1,1))
-                                fitted_model = arima_model.fit()
-                                
-                                # Generate predictions
-                                forecast = fitted_model.forecast(steps=len(ts_data)//2)
-                                
-                                # Create predictions in required format
-                                for i, pred in enumerate(forecast):
-                                    pred_array = np.full(config['predict_len'], pred)
-                                    predictions_list.append({
-                                        'symbol': symbol,
-                                        'prediction': pred_array.tolist()
-                                    })
-                            except Exception as e:
-                                print(f"   ARIMA failed for {symbol}: {e}")
-                                # Add dummy predictions if ARIMA fails
-                                dummy_pred = np.zeros(config['predict_len'])
-                                predictions_list.append({
-                                    'symbol': symbol,
-                                    'prediction': dummy_pred.tolist()
-                                })
-            
-            if predictions_list:
-                predictions_df = pd.DataFrame(predictions_list)
-                predictions_df['date'] = pd.date_range(start=config['start_date'], periods=len(predictions_df), freq='D')
-            else:
-                # Create empty predictions if no data
-                predictions_df = pd.DataFrame({
-                    'symbol': [config['symbols'][0]], 
-                    'prediction': [np.zeros(config['predict_len']).tolist()],
-                    'date': [pd.to_datetime(config['start_date'])]
-                })
-                
-            print(f"   ARIMA predictions generated for {len(predictions_list)} data points")
-            
-            # Add placeholder evaluation for ARIMA (simplified since it's a different paradigm)
-            print(f"\n--- Evaluating Multi-Horizon Performance for {model_name} ---")
-            arima_eval_results = {
-                'horizon_metrics': {f'horizon_{h}': {'MSE': 0.01, 'MAE': 0.1, 'RMSE': 0.1, 'MAPE': 10.0} for h in horizons_to_evaluate},
-                'detailed_predictions': create_empty_detailed_predictions_df(),
-                'summary_stats': {'total_samples': 0, 'horizons_evaluated': len(horizons_to_evaluate), 'avg_mse': 0.01, 'avg_mae': 0.1}
-            }
-            all_evaluation_results[model_name] = arima_eval_results
+        # === Unknown model type ===
+        else:
+            print(f"❌ Unknown model type: {model_type}")
+            continue
         
         # Ensure predictions_df is always defined
         if 'predictions_df' not in locals():
@@ -898,86 +600,6 @@ def run_pipeline():
                 'avg_gain': 0.0,
                 'avg_loss': 0.0
             }
-
-    # --- 4.5. Comprehensive Baseline Experiments ---
-    print("\n\n" + "="*80)
-    print("🧪 COMPREHENSIVE BASELINE EXPERIMENTS WITH DATA ABLATION")
-    print("="*80)
-    print("Running additional baseline models with different data combinations...")
-    
-    # Initialize baseline experiment runner
-    baseline_runner = BaselineExperimentRunner(random_state=42)
-    
-    # Prepare data for baseline experiments (need feature DataFrame)
-    feature_df = data_loader.processed_data.get('features', None)
-    if feature_df is not None:
-        print(f"   Feature matrix shape: {feature_df.shape}")
-        
-        # Split feature data temporally (same as main pipeline)
-        train_end_date = pd.to_datetime(data_loader.train_end)
-        train_feature_data = feature_df[pd.to_datetime(feature_df['date']) <= train_end_date]
-        val_feature_data = feature_df[pd.to_datetime(feature_df['date']) > train_end_date]
-        
-        print(f"   Train features: {train_feature_data.shape}")
-        print(f"   Validation features: {val_feature_data.shape}")
-        
-        # Run comprehensive baseline experiments
-        baseline_results = baseline_runner.run_comprehensive_experiment(
-            train_feature_data, val_feature_data
-        )
-        
-        # Add baseline results to main results
-        for key, result in baseline_results.items():
-            if result and 'model' in result:
-                # Create a prediction DataFrame for portfolio simulation
-                if 'predictions' in result and 'actuals' in result:
-                    baseline_predictions_df = pd.DataFrame({
-                        'symbol': [config['symbols'][0]] * len(result['predictions']),
-                        'prediction': result['predictions'],
-                        'date': pd.date_range(start=config['start_date'], periods=len(result['predictions']), freq='D')
-                    })
-                    
-                    # Run portfolio simulation for baseline models
-                    portfolio_results = run_portfolio_simulation(baseline_predictions_df, val_df)
-                    all_results[key] = portfolio_results
-                    
-                    # Add to evaluation results for comprehensive plotting
-                    baseline_eval = {
-                        'horizon_metrics': {'horizon_1': {'MSE': result['val_mse'], 'MAE': result['val_mae']}},
-                        'detailed_predictions': pd.DataFrame({
-                            'symbol': [config['symbols'][0]] * len(result['predictions']),
-                            'date': [f'sample_{i}' for i in range(len(result['predictions']))],  # Add date column
-                            'actual': result['actuals'],
-                            'prediction': result['predictions'],
-                            'horizon': [1] * len(result['predictions']),
-                            'squared_error': (result['actuals'] - result['predictions']) ** 2,
-                            'absolute_error': np.abs(result['actuals'] - result['predictions'])
-                        }),
-                        'summary_stats': {'avg_mse': result['val_mse'], 'avg_mae': result['val_mae']}
-                    }
-                    all_evaluation_results[key] = baseline_eval
-        
-        print(f"✅ Completed {len(baseline_results)} baseline experiments")
-        
-        # Initialize enhanced plotting manager
-        enhanced_plotter = EnhancedPlottingManager(results_dir)
-        
-        # Create comprehensive data ablation plots
-        enhanced_plotter.create_data_impact_analysis(baseline_results, "comprehensive_data_impact")
-        enhanced_plotter.create_ablation_study_heatmaps(baseline_results, "detailed_ablation_study")
-        enhanced_plotter.create_feature_importance_analysis(baseline_results, "feature_importance_analysis")
-        
-        # Create comprehensive comparison including neural networks
-        neural_results = {k: v for k, v in all_evaluation_results.items() 
-                         if k in ['LSTM', 'GRU', 'Transformer', 'TFT_with_News', 'TFT_without_News']}
-        enhanced_plotter.create_comprehensive_model_comparison(baseline_results, neural_results, "comprehensive_model_comparison")
-        
-        # Save detailed numerical results
-        enhanced_plotter.save_detailed_results_tables(baseline_results, neural_results)
-        
-    else:
-        print("⚠️  No feature data available for baseline experiments")
-        baseline_results = {}
 
     # --- 5. Results Summary and Visualization ---
     print("\n\n" + "="*80)

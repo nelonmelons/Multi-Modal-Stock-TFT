@@ -18,16 +18,6 @@ sys.path.append('/Users/haysoncheung/programs/pythonProject/TFT-b-nelson/Compari
 # Import PyTorch models
 from models import LSTMModel, GRUModel, TransformerModel, TFT
 
-# Import scikit-learn models
-from sklearn.linear_model import Ridge, Lasso, ElasticNet
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.svm import SVR
-from sklearn.neural_network import MLPRegressor
-import xgboost as xgb
-import lightgbm as lgb
-
 def count_pytorch_parameters(model):
     """Count trainable parameters in a PyTorch model."""
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -144,14 +134,7 @@ def get_sklearn_complexity(model, model_name, input_features=818):
                 'description': 'Hidden layers: (100, 50) (estimated)'
             })
     
-    elif 'ARIMA' in model_name:
-        # ARIMA: very simple, just a few parameters per time series
-        complexity_info.update({
-            'complexity_metric': 'ARIMA Parameters',
-            'complexity_value': 6,  # p, d, q parameters + some coefficients
-            'memory_estimate_mb': 0.001,
-            'description': 'Simple time series model'
-        })
+
     
     return complexity_info
 
@@ -239,89 +222,7 @@ def analyze_model_complexity():
                 'Description': f"Error: {e}"
             })
     
-    print("\n📊 CLASSICAL MACHINE LEARNING MODELS")
-    print("-" * 50)
-    
-    # === Scikit-learn Models ===
-    sklearn_models = [
-        # Full feature models
-        ("Ridge_Full", Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=1.0))]), input_dim_full),
-        ("Lasso_Full", Pipeline([('scaler', StandardScaler()), ('lasso', Lasso(alpha=0.1))]), input_dim_full),
-        ("ElasticNet_Full", Pipeline([('scaler', StandardScaler()), ('elastic', ElasticNet(alpha=0.1, l1_ratio=0.5))]), input_dim_full),
-        ("RandomForest_Full", RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1), input_dim_full),
-        ("XGBoost_Full", xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42), input_dim_full),
-        ("LightGBM_Full", lgb.LGBMRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42, verbose=-1), input_dim_full),
-        ("GradientBoosting_Full", GradientBoostingRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42), input_dim_full),
-        ("SVR_Full", Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, gamma='scale'))]), input_dim_full),
-        ("MLP_Full", Pipeline([('scaler', StandardScaler()), ('mlp', MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42))]), input_dim_full),
-        
-        # No news models
-        ("Ridge_No_News", Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=1.0))]), input_dim_no_news),
-        ("Lasso_No_News", Pipeline([('scaler', StandardScaler()), ('lasso', Lasso(alpha=0.1))]), input_dim_no_news),
-        ("RandomForest_No_News", RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1), input_dim_no_news),
-        ("XGBoost_No_News", xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42), input_dim_no_news),
-        ("LightGBM_No_News", lgb.LGBMRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42, verbose=-1), input_dim_no_news),
-        ("SVR_No_News", Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, gamma='scale'))]), input_dim_no_news),
-        ("MLP_No_News", Pipeline([('scaler', StandardScaler()), ('mlp', MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42))]), input_dim_no_news),
-        
-        # Price only models
-        ("Ridge_Price_Only", Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=1.0))]), input_dim_price_only),
-        
-        # Technical only models
-        ("RandomForest_Technical", RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1), input_dim_technical_only),
-        
-        # No economic models
-        ("XGBoost_No_Economic", xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42), input_dim_full - 8),  # Remove 8 economic features
-    ]
-    
-    for model_name, model, input_features in sklearn_models:
-        try:
-            complexity_info = get_sklearn_complexity(model, model_name, input_features)
-            
-            results.append({
-                'Model': model_name,
-                'Type': 'Classical ML',
-                'Input Features': input_features,
-                'Complexity Metric': complexity_info['complexity_metric'],
-                'Complexity Value': complexity_info['complexity_value'],
-                'Memory (MB)': complexity_info['memory_estimate_mb'],
-                'Description': complexity_info['description']
-            })
-            
-            print(f"✅ {model_name:25} | {complexity_info['complexity_value']:>12,} {complexity_info['complexity_metric']:>20} | {complexity_info['memory_estimate_mb']:>8.2f} MB")
-            
-        except Exception as e:
-            print(f"❌ {model_name:25} | Error: {e}")
-            results.append({
-                'Model': model_name,
-                'Type': 'Classical ML',
-                'Input Features': input_features,
-                'Complexity Metric': 'Error',
-                'Complexity Value': 0,
-                'Memory (MB)': 0,
-                'Description': f"Error: {e}"
-            })
-    
-    # === Time Series Models ===
-    print(f"\n📈 TIME SERIES MODELS")
-    print("-" * 50)
-    
-    arima_complexity = get_sklearn_complexity(None, 'ARIMA', 1)  # ARIMA uses only price history
-    results.append({
-        'Model': 'ARIMA',
-        'Type': 'Time Series',
-        'Input Features': 1,  # Only price history
-        'Complexity Metric': arima_complexity['complexity_metric'],
-        'Complexity Value': arima_complexity['complexity_value'],
-        'Memory (MB)': arima_complexity['memory_estimate_mb'],
-        'Description': arima_complexity['description']
-    })
-    
-    print(f"✅ {'ARIMA':25} | {arima_complexity['complexity_value']:>12,} {arima_complexity['complexity_metric']:>20} | {arima_complexity['memory_estimate_mb']:>8.2f} MB")
-    
-    # === Summary Tables ===
-    print("\n\n" + "=" * 100)
-    print("📋 COMPREHENSIVE MODEL COMPLEXITY SUMMARY")
+    print("\n COMPREHENSIVE MODEL COMPLEXITY SUMMARY")
     print("=" * 100)
     
     # Create detailed table

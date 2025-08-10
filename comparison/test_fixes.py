@@ -121,7 +121,7 @@ def test_model_differentiation():
     # Simulate the model prediction process
     base_prediction = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
     
-    models = ['Ridge_Full', 'Lasso_Full', 'XGBoost_Full']
+    models = ['LSTM_Full', 'GRU_Full', 'TFT_with_News']
     predictions = {}
     
     for model_name in models:

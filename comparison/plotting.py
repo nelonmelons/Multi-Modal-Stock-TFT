@@ -728,7 +728,7 @@ def plot_ablation_study(all_evaluation_results: Dict[str, Dict], save_dir: str):
     
     # Define feature groups and models for ablation analysis
     feature_groups = ['News', 'Economic', 'Technical']
-    models_to_analyze = ['Random Forest', 'Ridge Regression', 'XGBoost']
+    models_to_analyze = ['LSTM', 'GRU', 'Transformer']
     
     # Get all symbols
     all_symbols = set()
