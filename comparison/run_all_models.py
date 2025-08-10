@@ -5,6 +5,7 @@ Main pipeline to run all model comparisons.
 import os
 import pandas as pd
 import numpy as np
+import torch
 from datetime import datetime
 from prettytable import PrettyTable
 from dateutil.relativedelta import relativedelta
@@ -254,6 +255,18 @@ def run_pipeline():
     print("="*50)
     device = setup_device()
     print(f"Selected device: {device}")
+    
+    # Enable CUDA optimizations if using CUDA
+    if device.type == 'cuda':
+        torch.backends.cudnn.benchmark = True  # Optimize for consistent input sizes
+        torch.backends.cudnn.deterministic = False  # Allow non-deterministic for speed
+        print("🔧 CUDA optimizations enabled")
+        print(f"   - cuDNN benchmark: {torch.backends.cudnn.benchmark}")
+        print(f"   - Available GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        # Clear any existing cache
+        torch.cuda.empty_cache()
+        print("   - GPU cache cleared")
+    
     print("="*50 + "\n")
     
     # --- 1. Configuration ---
@@ -343,7 +356,7 @@ def run_pipeline():
         # === Neural Network Models (PyTorch) ===
         "LSTM_Full": {
             "type": "pytorch",
-            "model": LSTMModel(input_dim=input_dim, hidden_dim=64, num_layers=2, output_dim=config['predict_len']),
+            "model": LSTMModel(input_dim=input_dim, hidden_dim=64, num_layers=2, output_dim=config['predict_len']).to(config['device']),
             "description": "LSTM with all available features including news, economic, and technical indicators."
         },
         "LSTM_No_News": {
@@ -363,7 +376,7 @@ def run_pipeline():
         
         "GRU_Full": {
             "type": "pytorch",
-            "model": GRUModel(input_dim=input_dim, hidden_dim=64, num_layers=2, output_dim=config['predict_len']),
+            "model": GRUModel(input_dim=input_dim, hidden_dim=64, num_layers=2, output_dim=config['predict_len']).to(config['device']),
             "description": "GRU with all available features including news, economic, and technical indicators."
         },
         "GRU_No_News": {
@@ -376,7 +389,7 @@ def run_pipeline():
         
         "Transformer_Full": {
             "type": "pytorch",
-            "model": TransformerModel(input_dim=input_dim, model_dim=64, num_heads=4, num_layers=2, output_dim=config['predict_len']),
+            "model": TransformerModel(input_dim=input_dim, model_dim=64, num_heads=4, num_layers=2, output_dim=config['predict_len']).to(config['device']),
             "description": "Transformer with all available features for comprehensive time series modeling."
         },
         "Transformer_No_News": {
@@ -390,12 +403,12 @@ def run_pipeline():
         # === TFT Models with Different Data Combinations ===
         "TFT_with_News": {
             "type": "pytorch_news",
-            "model": TFT(input_size=input_dim, news_dim=news_dim, hidden_size=64, num_heads=4, dropout=0.1, prediction_len=config['predict_len']),
+            "model": TFT(input_size=input_dim, news_dim=news_dim, hidden_size=64, num_heads=4, dropout=0.1, prediction_len=config['predict_len']).to(config['device']),
             "description": "Temporal Fusion Transformer with news sentiment data integration."
         },
         "TFT_without_News": {
             "type": "pytorch",
-            "model": TFT(input_size=input_dim, news_dim=0, hidden_size=64, num_heads=4, dropout=0.1, prediction_len=config['predict_len']),
+            "model": TFT(input_size=input_dim, news_dim=0, hidden_size=64, num_heads=4, dropout=0.1, prediction_len=config['predict_len']).to(config['device']),
             "description": "TFT baseline without news data for ablation study."
         },
         "TFT_Price_Technical": {
@@ -514,8 +527,8 @@ def run_pipeline():
                     if 'input_dim' in model_params:
                         del model_params['input_dim']
                 
-                model = model_class(**model_params)
-                print(f"   Created {model_class.__name__} with input_dim={filtered_input_dim}")
+                model = model_class(**model_params).to(config['device'])
+                print(f"   Created {model_class.__name__} with input_dim={filtered_input_dim} on {config['device']}")
             else:
                 model = model_info['model']
             
@@ -523,14 +536,14 @@ def run_pipeline():
             train_features_list, train_targets_list = [], []
             for features, targets in data_module.train_loader:
                 filtered_features, _ = filter_features_by_type(features.numpy(), feature_df, filter_type, news_dim)
-                train_features_list.append(torch.FloatTensor(filtered_features))
-                train_targets_list.append(targets)
+                train_features_list.append(torch.FloatTensor(filtered_features).to(config['device']))
+                train_targets_list.append(targets.to(config['device']))
             
             val_features_list, val_targets_list = [], []
             for features, targets in data_module.val_loader:
                 filtered_features, _ = filter_features_by_type(features.numpy(), feature_df, filter_type, news_dim)
-                val_features_list.append(torch.FloatTensor(filtered_features))
-                val_targets_list.append(targets)
+                val_features_list.append(torch.FloatTensor(filtered_features).to(config['device']))
+                val_targets_list.append(targets.to(config['device']))
             
             # Create new data loaders with filtered features
             train_features_tensor = torch.cat(train_features_list, dim=0)
@@ -600,6 +613,11 @@ def run_pipeline():
                 'avg_gain': 0.0,
                 'avg_loss': 0.0
             }
+        
+        # Clean up GPU memory after each model if using CUDA
+        if config['device'].type == 'cuda':
+            torch.cuda.empty_cache()
+            print(f"   🧹 GPU cache cleared after {model_name}")
 
     # --- 5. Results Summary and Visualization ---
     print("\n\n" + "="*80)

@@ -431,8 +431,19 @@ class EnhancedTFT(nn.Module):
         return prediction
 
 def setup_device():
-    """Setup device with M1 Mac optimization."""
-    if torch.backends.mps.is_available():
+    """Setup device with GPU prioritization (CUDA > MPS > CPU)."""
+    if torch.cuda.is_available():
+        try:
+            # Test CUDA with a simple operation
+            test_tensor = torch.randn(2, 2, device='cuda')
+            test_result = test_tensor @ test_tensor
+            device = torch.device("cuda")
+            print(f"🚀 Using CUDA GPU acceleration (Device: {torch.cuda.get_device_name()})")
+            print(f"   GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+            return device
+        except Exception as e:
+            print(f"⚠️ CUDA test failed: {e}")
+    elif torch.backends.mps.is_available():
         try:
             # Test MPS with a simple operation
             test_tensor = torch.randn(2, 2, device='mps')
@@ -442,11 +453,9 @@ def setup_device():
             return device
         except Exception as e:
             print(f"⚠️ MPS test failed: {e}")
-            print("💻 Falling back to CPU")
-            return torch.device("cpu")
-    else:
-        print("💻 Using CPU (MPS not available)")
-        return torch.device("cpu")
+    
+    print("💻 Using CPU (GPU not available)")
+    return torch.device("cpu")
 
 def prepare_data_for_training(datamodule, device, max_batches=20):
     """Prepare data for training with proper tensor handling and progress bars."""
