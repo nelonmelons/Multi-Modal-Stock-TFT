@@ -488,18 +488,18 @@ def save_all_artifacts(all_evaluation_results: Dict[str, Dict], all_results: Dic
     print("💾 Saving all artifacts...")
     
     # Save configuration
-    with open(f"{save_dir}/config.txt", 'w') as f:
+    with open(f"{save_dir}/config.txt", 'w', encoding='utf-8') as f:
         f.write("EXPERIMENT CONFIGURATION\n")
         f.write("=" * 50 + "\n")
         for key, value in config.items():
             f.write(f"{key}: {value}\n")
     
     # Save horizon comparison table
-    with open(f"{save_dir}/horizon_comparison.txt", 'w') as f:
+    with open(f"{save_dir}/horizon_comparison.txt", 'w', encoding='utf-8') as f:
         f.write(horizon_table_str)
     
     # Save portfolio results table  
-    with open(f"{save_dir}/portfolio_results.txt", 'w') as f:
+    with open(f"{save_dir}/portfolio_results.txt", 'w', encoding='utf-8') as f:
         f.write(portfolio_table_str)
     
     # Save detailed evaluation results as CSV
@@ -512,8 +512,8 @@ def save_all_artifacts(all_evaluation_results: Dict[str, Dict], all_results: Dic
     
     if all_detailed_predictions:
         combined_df = pd.concat(all_detailed_predictions, ignore_index=True)
-        combined_df.to_csv(f"{save_dir}/detailed_predictions.csv", index=False)
-        print(f"✅ Detailed predictions saved to {save_dir}/detailed_predictions.csv")
+        # CSV output removed - detailed predictions DataFrame created but not saved to CSV
+        print(f"✅ Detailed predictions DataFrame created with {len(combined_df)} rows")
     
     # Save horizon metrics as CSV
     horizon_metrics_list = []
@@ -526,8 +526,8 @@ def save_all_artifacts(all_evaluation_results: Dict[str, Dict], all_results: Dic
     
     if horizon_metrics_list:
         horizon_df = pd.DataFrame(horizon_metrics_list)
-        horizon_df.to_csv(f"{save_dir}/horizon_metrics.csv", index=False)
-        print(f"✅ Horizon metrics saved to {save_dir}/horizon_metrics.csv")
+        # CSV output removed - horizon metrics DataFrame created but not saved to CSV
+        print(f"✅ Horizon metrics DataFrame created with {len(horizon_df)} rows")
     
     # Save portfolio results as CSV
     portfolio_list = []
@@ -538,11 +538,11 @@ def save_all_artifacts(all_evaluation_results: Dict[str, Dict], all_results: Dic
     
     if portfolio_list:
         portfolio_df = pd.DataFrame(portfolio_list)
-        portfolio_df.to_csv(f"{save_dir}/portfolio_results.csv", index=False)
-        print(f"✅ Portfolio results saved to {save_dir}/portfolio_results.csv")
+        # CSV output removed - portfolio results DataFrame created but not saved to CSV
+        print(f"✅ Portfolio results DataFrame created with {len(portfolio_df)} rows")
     
     # Create summary report
-    with open(f"{save_dir}/experiment_summary.txt", 'w') as f:
+    with open(f"{save_dir}/experiment_summary.txt", 'w', encoding='utf-8') as f:
         f.write("EXPERIMENT SUMMARY REPORT\n")
         f.write("=" * 50 + "\n")
         f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -914,20 +914,19 @@ def save_evaluation_artifacts(all_evaluation_results: Dict[str, Dict],
     
     if summary_data:
         summary_df = pd.DataFrame(summary_data)
-        summary_df.to_csv(os.path.join(save_dir, 'horizon_evaluation_summary.csv'), index=False)
-        print(f"✅ Evaluation summary saved to {save_dir}/horizon_evaluation_summary.csv")
+        # CSV output removed - evaluation summary DataFrame created but not saved to CSV
+        print(f"✅ Evaluation summary DataFrame created with {len(summary_df)} rows")
     
     # Save portfolio results
     if all_results:
         portfolio_df = pd.DataFrame.from_dict(all_results, orient='index')
-        portfolio_df.to_csv(os.path.join(save_dir, 'portfolio_results.csv'))
-        print(f"✅ Portfolio results saved to {save_dir}/portfolio_results.csv")
+        # CSV output removed - portfolio results DataFrame created but not saved to CSV
+        print(f"✅ Portfolio results DataFrame created with {len(portfolio_df)} rows")
     
-    # Save detailed predictions for each model
+    # Process detailed predictions for each model (but don't save to CSV)
     for model_name, results in all_evaluation_results.items():
         if 'detailed_predictions' in results and not results['detailed_predictions'].empty:
             predictions_df = results['detailed_predictions']
-            filename = f'{model_name.lower().replace(" ", "_")}_detailed_predictions.csv'
-            predictions_df.to_csv(os.path.join(save_dir, filename), index=False)
+            print(f"✅ Processed detailed predictions for {model_name}: {len(predictions_df)} rows")
     
     print(f"✅ All evaluation artifacts saved to {save_dir}/")

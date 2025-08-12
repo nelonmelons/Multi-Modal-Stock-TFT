@@ -297,13 +297,11 @@ def analyze_model_complexity():
     
     # === Save Results ===
     print("\n\n" + "=" * 80)
-    print("💾 SAVING RESULTS")
+    print("💾 PROCESSING RESULTS")
     print("=" * 80)
     
-    # Save to CSV
-    csv_path = "/Users/haysoncheung/programs/pythonProject/TFT-b-nelson/Comparision/model_complexity_analysis.csv"
-    df.to_csv(csv_path, index=False)
-    print(f"✅ Detailed results saved to: {csv_path}")
+    # CSV output removed - complexity analysis DataFrame created but not saved to CSV
+    print(f"✅ Model complexity analysis DataFrame created with {len(df)} rows")
     
     # Save summary statistics
     summary_stats = {

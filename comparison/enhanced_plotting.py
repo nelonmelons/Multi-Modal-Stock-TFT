@@ -250,27 +250,26 @@ class EnhancedPlottingManager:
         
         # Create comprehensive summary
         summary_df = self._results_to_dataframe(all_results)
-        summary_df.to_csv(os.path.join(self.save_dir, 'comprehensive_results.csv'), index=False)
+        # CSV output removed - comprehensive results DataFrame created but not saved to CSV
+        print(f"✅ Comprehensive results DataFrame created with {len(summary_df)} rows")
         
-        # Create model-specific summaries
+        # Create model-specific summaries (but don't save to CSV)
         for model in summary_df['Model'].unique():
             model_df = summary_df[summary_df['Model'] == model]
-            filename = f"{model.lower().replace(' ', '_')}_results.csv"
-            model_df.to_csv(os.path.join(self.save_dir, filename), index=False)
+            print(f"✅ Processed results for {model}: {len(model_df)} rows")
         
-        # Create data combination summaries
+        # Create data combination summaries (but don't save to CSV)
         for combo in summary_df['Data_Combination'].unique():
             combo_df = summary_df[summary_df['Data_Combination'] == combo]
-            filename = f"{combo}_results.csv"
-            combo_df.to_csv(os.path.join(self.save_dir, filename), index=False)
+            print(f"✅ Processed {combo} combination: {len(combo_df)} models")
         
-        # Create best models summary
+        # Create best models summary (but don't save to CSV)
         best_models = summary_df.nlargest(20, 'Val_R2')
-        best_models.to_csv(os.path.join(self.save_dir, 'best_models_summary.csv'), index=False)
+        print(f"✅ Identified top {len(best_models)} performing models")
         
-        # Create data source impact summary
+        # Create data source impact summary (but don't save to CSV)
         impact_summary = self._create_data_impact_summary(summary_df)
-        impact_summary.to_csv(os.path.join(self.save_dir, 'data_source_impact.csv'), index=False)
+        print(f"✅ Data source impact analysis completed with {len(impact_summary)} entries")
         
         print(f"✅ Detailed results saved to {self.save_dir}/")
     

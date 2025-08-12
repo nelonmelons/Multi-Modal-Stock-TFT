@@ -30,6 +30,7 @@ TA-Lib>=0.4.25
 tqdm>=4.64.0
 scikit-learn>=1.1.0  # Still needed for preprocessing utilities like StandardScaler
 joblib>=1.1.0
+xgboost>=1.7.0
 
 # Configuration and Logging
 pyyaml>=6.0

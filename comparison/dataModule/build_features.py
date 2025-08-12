@@ -266,7 +266,15 @@ def add_events_features(df: pd.DataFrame, events: Dict[str, Dict[str, Any]],
         # Process earnings events with enhanced relative timing for prediction
         if 'earnings' in symbol_events and symbol_events['earnings']:
             earnings_dates = [pd.to_datetime(date) for date in symbol_events['earnings']]
-            eps_data = symbol_events.get('eps_data', pd.DataFrame())
+            eps_data_raw = symbol_events.get('eps_data', pd.DataFrame())
+            
+            # Handle case where eps_data might be a string due to JSON serialization
+            if isinstance(eps_data_raw, str):
+                # If it's a string, it means it was serialized as DataFrame string representation
+                # We'll just use an empty DataFrame since the string representation isn't easily parseable
+                eps_data = pd.DataFrame()
+            else:
+                eps_data = eps_data_raw.copy() if hasattr(eps_data_raw, 'copy') else pd.DataFrame()
             
             for idx, row in df_events[symbol_mask].iterrows():
                 current_date = pd.to_datetime(row['date'])
@@ -429,18 +437,37 @@ def add_events_features_temporal_safe(df: pd.DataFrame, events: Dict[str, Dict[s
         # Process earnings events with TEMPORAL CONSTRAINTS
         if 'earnings' in symbol_events and symbol_events['earnings']:
             all_earnings_dates = [pd.to_datetime(date) for date in symbol_events['earnings']]
+            # Attempt to use EPS dataset timing to shift after-hours to next day
+            eps_data_raw = symbol_events.get('eps_data', pd.DataFrame())
+            
+            # Handle case where eps_data might be a string due to JSON serialization
+            if isinstance(eps_data_raw, str):
+                # If it's a string, it means it was serialized as DataFrame string representation
+                # We'll just use an empty DataFrame since the string representation isn't easily parseable
+                eps_data = pd.DataFrame()
+            else:
+                eps_data = eps_data_raw.copy() if hasattr(eps_data_raw, 'copy') else pd.DataFrame()
+                
+            if not eps_data.empty:
+                if 'date' in eps_data.columns:
+                    eps_data['date'] = pd.to_datetime(eps_data['date'])
+                # Common timing column names
+                time_col = None
+                for c in ['time', 'releaseTime', 'period', 'when']:
+                    if c in eps_data.columns:
+                        time_col = c
+                        break
+                if time_col:
+                    # If PM/AMC indicated, shift event date by +1 business day for feature alignment
+                    pm_mask = eps_data[time_col].astype(str).str.lower().str.contains('pm|amc|after')
+                    eps_data.loc[pm_mask, 'date'] = eps_data.loc[pm_mask, 'date'] + pd.tseries.offsets.BDay(1)
             
             # CRITICAL FIX: Filter earnings calendar based on temporal constraints
             if temporal_cutoff:
-                # For training data: only use earnings that were known by split date
-                # This prevents using future earnings calendar information
                 earnings_dates = [d for d in all_earnings_dates if d <= temporal_cutoff]
                 print(f"Symbol {symbol}: Filtered earnings from {len(all_earnings_dates)} to {len(earnings_dates)} entries (cutoff: {temporal_cutoff})")
             else:
-                # For prediction/validation: use all available earnings (assuming real-world scenario)
                 earnings_dates = all_earnings_dates
-            
-            eps_data = symbol_events.get('eps_data', pd.DataFrame())
             
             for idx, row in df_events[symbol_mask].iterrows():
                 current_date = pd.to_datetime(row['date'])
@@ -459,6 +486,7 @@ def add_events_features_temporal_safe(df: pd.DataFrame, events: Dict[str, Dict[s
                 future_earnings = [d for d in available_earnings if d > current_date]
                 if future_earnings:
                     days_to_next = (min(future_earnings) - current_date).days
+                    days_to_next = max(days_to_next, 0)  # known-future covariate clipped at 0 after event
                     df_events.loc[idx, 'days_to_next_earnings'] = min(days_to_next, 999)
                     
                     # Add EPS estimate for next earnings (temporal-safe)
@@ -532,13 +560,33 @@ def merge_news_features(df: pd.DataFrame, news_df: pd.DataFrame) -> pd.DataFrame
 
 def merge_news_features_temporal_safe(df: pd.DataFrame, news_df: pd.DataFrame, 
                                      split_date: str = None, is_training: bool = True) -> pd.DataFrame:
-    """Merge news embeddings with TEMPORAL CONSTRAINTS to prevent data leakage."""
+    """Merge news embeddings with TEMPORAL CONSTRAINTS to prevent data leakage.
+    Also shift after-hours news to next trading day when time information is available.
+    """
     if news_df.empty:
         return df
     
     df_copy = df.copy()
     news_copy = news_df.copy()
+
+    # If publication datetime exists, derive a local hour and shift after-hours to next day
+    for cand in ['published_at', 'timestamp', 'datetime']:
+        if cand in news_copy.columns:
+            ts = pd.to_datetime(news_copy[cand], errors='coerce')
+            news_copy['date'] = ts.dt.tz_localize(None).dt.date
+            news_copy['hour'] = ts.dt.hour
+            break
+    # Fallback to existing date
+    if 'date' in news_copy.columns:
+        news_copy['date'] = pd.to_datetime(news_copy['date']).dt.tz_localize(None)
     
+    # Shift: if hour >= 16 (after market close), move to next business day
+    if 'hour' in news_copy.columns:
+        after_hours_mask = news_copy['hour'] >= 16
+        if after_hours_mask.any():
+            news_copy.loc[after_hours_mask, 'date'] = pd.to_datetime(news_copy.loc[after_hours_mask, 'date']) + pd.tseries.offsets.BDay(1)
+        news_copy.drop(columns=['hour'], inplace=True, errors='ignore')
+
     # Convert to datetime and normalize timezones
     df_copy['date'] = pd.to_datetime(df_copy['date'])
     news_copy['date'] = pd.to_datetime(news_copy['date'])
@@ -551,7 +599,6 @@ def merge_news_features_temporal_safe(df: pd.DataFrame, news_df: pd.DataFrame,
     # TEMPORAL CONSTRAINT: Filter news data based on split date to prevent leakage
     if split_date and is_training:
         temporal_cutoff = pd.to_datetime(split_date)
-        # For training: only use news from before split date
         news_copy = news_copy[news_copy['date'] <= temporal_cutoff].copy()
         print(f"TEMPORAL CONSTRAINT: Filtered news data up to {temporal_cutoff}")
     
@@ -562,7 +609,7 @@ def merge_news_features_temporal_safe(df: pd.DataFrame, news_df: pd.DataFrame,
         how='left'
     )
     
-    # Fill missing news embeddings with zeros (temporal-safe)
+    # Fill missing news features with zeros
     news_cols = [col for col in news_copy.columns if col.startswith('emb_') or col == 'sentiment_score']
     for col in news_cols:
         if col in merged_df.columns:
@@ -668,7 +715,7 @@ def merge_fred_features_temporal_safe(df: pd.DataFrame, fred_df: pd.DataFrame,
 
 def add_target_variable_temporal_safe(df: pd.DataFrame, predict_len: int, split_date: str = None, 
                                      is_training: bool = True) -> pd.DataFrame:
-    """Add target variables for multi-step prediction with TEMPORAL ALIGNMENT."""
+    """Add target variables for multi-step prediction with TEMPORAL ALIGNMENT using log returns."""
     df_target = df.copy()
     
     target_data = []
@@ -676,20 +723,17 @@ def add_target_variable_temporal_safe(df: pd.DataFrame, predict_len: int, split_
     for symbol in df['symbol'].unique():
         symbol_df = df[df['symbol'] == symbol].copy()
         symbol_df = symbol_df.sort_values('date')
+        symbol_df['log_close'] = np.log(symbol_df['close'].clip(lower=1e-8))
         
-        # Create multi-step future returns as targets
         target_cols = []
         for i in range(predict_len):
             col_name = f'target_{i}'
-            # Calculate the return relative to the current day's close price
-            future_close = symbol_df['close'].shift(-(i + 1))
-            symbol_df[col_name] = (future_close - symbol_df['close']) / symbol_df['close']
+            future_log_close = symbol_df['log_close'].shift(-(i + 1))
+            symbol_df[col_name] = future_log_close - symbol_df['log_close']
             target_cols.append(col_name)
 
-        # Drop rows where any of the new target columns are NaN
         symbol_df = symbol_df.dropna(subset=target_cols)
-        
-        target_data.append(symbol_df)
+        target_data.append(symbol_df.drop(columns=['log_close']))
     
     if not target_data:
         return pd.DataFrame()
@@ -697,10 +741,7 @@ def add_target_variable_temporal_safe(df: pd.DataFrame, predict_len: int, split_
     df_target = pd.concat(target_data, ignore_index=True)
     df_target = df_target.sort_values(['symbol', 'date']).reset_index(drop=True)
     
-    # The datamodule will be updated to handle multiple target columns
-    # For now, we will keep the individual columns
-    
-    print(f"Added {predict_len}-step target variables with TEMPORAL ALIGNMENT")
+    print(f"Added {predict_len}-step target variables (log-returns) with TEMPORAL ALIGNMENT")
     return df_target
 
 
