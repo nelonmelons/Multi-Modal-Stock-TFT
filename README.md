@@ -1,16 +1,5 @@
 # 📈 Stock TFT: Temporal Fusion Transformer for Stock Price Prediction
 
-## ✅ Current Status - PRODUCTION READY
-
-The TFT pipeline has been **fully refactored and is production-ready**:
-
-### 🎯 Key Features Implemented
-
-- **✅ Real Model Integration**: All scripts use the real TFT model (no mock models)
-- **✅ Out-of-Sample Validation**: Proper temporal and symbol-based validation
-
-        optimizer.zero_grad()
-
 ## Multi-Modal Stock Model Comparison (comparison/)
 
 This repo’s active codebase lives in `comparison/`. It implements a leakage-safe, multi-horizon stock prediction pipeline with caching, classical baselines, and deep models.
@@ -128,5 +117,3 @@ comparison/
 
 - Edit experiment lists, seeds, and horizons in `comparison/run_all_models.py`
 - Adjust lookback/predict_len and batch size in the base config block
-
-This README reflects only the `comparison/` code and its behavior.
