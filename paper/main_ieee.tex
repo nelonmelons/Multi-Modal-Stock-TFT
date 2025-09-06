@@ -19,9 +19,30 @@
 \usepackage[T1]{fontenc} % Better font encoding; reduces issues with accented/Unicode chars
 \usepackage[top=1.9cm,bottom=2.65cm,left=2cm,right=2cm]{geometry} % Ensure minimum margins: top 1.9cm, bottom 2.53cm
 
+% Revision highlighting packages
+\usepackage{soul}
+\usepackage[normalem]{ulem} % underline/strikeout without altering \emph
+\usepackage{changes}
+\usepackage{xcolor}
+\definecolor{lightgray}{gray}{0.9}
+% Revision author + markup: underline additions; strikeout deletions (no colors)
+\definechangesauthor[name={Revision}, color=black]{rev}
+\setaddedmarkup{\uline{#1}}
+\setdeletedmarkup{\sout{#1}}
+
+% Unified revision macros
+% Usage:
+%  \rev{new or revised text}  -> underlined
+%  \revdel{deleted text}      -> struck out
+%  \revrep{old}{new}          -> shows replacement (new underlined, old struck)
+%  \simp{simplified text}     -> italicized for simplified/reworded content
+\newcommand{\rev}[1]{\added[id=rev]{#1}}
+\newcommand{\revdel}[1]{\deleted[id=rev]{#1}}
+\newcommand{\revrep}[2]{\replaced[id=rev]{#2}{#1}}
+\newcommand{\simp}[1]{{\itshape #1}}
+
 % Increase column separation to meet 0.25 inch requirement
 \setlength{\columnsep}{0.28in}
-
 
 % (natbib provides \citep and \citet)
 
@@ -76,51 +97,53 @@ We evaluate each hypothesis using the held-out test set (see Abstract for split)
   \item \textit{H3:} Best-in-class models differ across regimes (2022 bear vs 2023--24 rally), verified by per-regime leaderboards and non-overlapping bootstrap CIs.
 \end{itemize}
 
-\paragraph{Hypothesis rationale:}
-H1 reflects a common prior that attention-based architectures should capture long-range dependencies and heterogeneous covariates better than simpler sequence/tabular models \citep{lim2021temporal}, potentially yielding gains at longer horizons (here, $h{=}21$). H2 follows established finance findings that earnings-related variables (surprises, timing) add predictive power, particularly over weeks due to PEAD \citep{bernard1989,schnaubelt2020}. H3 is motivated by the Adaptive Markets Hypothesis \citep{lo2004} and regime-dependent performance noted in recent reviews (e.g., pre-/post-COVID comparisons) \citep{zhang2023review}. Our decision thresholds (2 pp in \da{}, 5\% in \rmse{}) target effects that are practically meaningful given typical daily-return noise and avoid declaring wins on statistically significant but economically negligible differences.
+\paragraph{Hypothesis rationale}
+\simp{H1 is based on the idea that attention mechanisms in transformers should handle long-term dependencies and mixed data types better than simpler models \citep{lim2021temporal}, which might give them an advantage at longer horizons like $h{=}21$. H2 follows from established findings that earnings-related information improves predictions, especially over weeks due to post-earnings-announcement drift \citep{bernard1989,schnaubelt2020}. H3 reflects the Adaptive Markets Hypothesis \citep{lo2004} and observations that model performance changes with market conditions \citep{zhang2023review}. We set thresholds of 2 percentage points for directional accuracy and 5\% for RMSE to focus on practically meaningful differences rather than small statistical effects.}
 
 
 
 \section{Related Work}
 Approaches to multi-horizon financial forecasting (1-day, 1-week, 1-month) range from classical time series to modern ML, with mixed success across horizons and regimes.
 
-\paragraph{Classical time-series baselines.} ARIMA models remain standard but assume linearity and stationarity, limiting usefulness at longer horizons or during regime shifts \citep{box2015}. VAR shares these issues in high-dimensional, nonstationary settings. GARCH captures conditional variance rather than mean returns, restricting its role in multi-step prediction.
+\paragraph{Classical time-series baselines} ARIMA models remain standard but assume linearity and stationarity, limiting usefulness at longer horizons or during regime shifts \citep{box2015}. VAR shares these issues in high-dimensional, nonstationary settings. GARCH captures conditional variance rather than mean returns, restricting its role in multi-step prediction.
 
-\paragraph{Traditional ML baselines and horizon effects.} Tree ensembles and SVMs often outperform linear models with engineered features, but accuracy declines with horizon length due to error accumulation \citep{gu2018,chen2016xgboost}. Surveys confirm this degradation (e.g., 1-day to 20-day) across assets and markets \citep{zhang2023review}. In stock panels, ML methods surpass simple rules on cross-sectional tasks, though gains depend on validation design \citep{gu2018}.
+\paragraph{Traditional ML baselines and horizon effects} Tree ensembles and SVMs often outperform linear models with engineered features, but accuracy declines with horizon length due to error accumulation \citep{gu2018,chen2016xgboost}. Surveys confirm this degradation (e.g., 1-day to 20-day) across assets and markets \citep{zhang2023review}. In stock panels, ML methods surpass simple rules on cross-sectional tasks, though gains depend on validation design \citep{gu2018}.
 
-\paragraph{Deep and hybrid architectures.} RNNs (LSTM, GRU) capture temporal dependencies and often beat classical and tree models \citep{hochreiter1997long,cho2014learning,fischer2018,selvin2017}. Hybrids like CNN-LSTM improve short- and long-horizon forecasts by extracting local patterns first \citep{selvin2017}. Echo State Networks (ESN) offer efficient reservoir-based sequence modeling \citep{jaeger2001esn}.
+\paragraph{Deep and hybrid architectures} RNNs (LSTM, GRU) capture temporal dependencies and often beat classical and tree models \citep{hochreiter1997long,cho2014learning,fischer2018,selvin2017}. Hybrids like CNN-LSTM improve short- and long-horizon forecasts by extracting local patterns first \citep{selvin2017}. Echo State Networks (ESN) offer efficient reservoir-based sequence modeling \citep{jaeger2001esn}.
 
-\paragraph{Attention and transformers.} Attention mechanisms highlight horizon-specific context; e.g., attention-based CNN-LSTMs for crypto \citep{xu2022bitcoin}. The Temporal Fusion Transformer (TFT) \citep{lim2021temporal} produces multi-horizon outputs via recurrent encoders, static/context encoders, and interpretable attention. In finance, TFT variants capture short- and long-range patterns, but on small daily panels often perform comparably to strong RNNs \citep{zhang2023review}.
+\paragraph{Attention and transformers} Attention mechanisms highlight horizon-specific context; e.g., attention-based CNN-LSTMs for crypto \citep{xu2022bitcoin}. The Temporal Fusion Transformer (TFT) \citep{lim2021temporal} produces multi-horizon outputs via recurrent encoders, static/context encoders, and interpretable attention. In finance, TFT variants capture short- and long-range patterns, but on small daily panels often perform comparably to strong RNNs \citep{zhang2023review}.
 
-\paragraph{Hybrid and ensemble methods.} Mixing linear and nonlinear models mitigates misspecification: ARIMA-LSTM and exponential-smoothing/RNN hybrids have been competitive \citep{smyl2020}. Practitioners also combine sequential encoders with tabular learners. In equity cross-sections, ensembles of trees and deep nets remain strong \citep{krauss2017}.
+\paragraph{Hybrid and ensemble methods} Mixing linear and nonlinear models mitigates misspecification: ARIMA-LSTM and exponential-smoothing/RNN hybrids have been competitive \citep{smyl2020}. Practitioners also combine sequential encoders with tabular learners. In equity cross-sections, ensembles of trees and deep nets remain strong \citep{krauss2017}.
 
-\paragraph{Integrating technical, earnings, and events.} Structured earnings/event features add predictive power, consistent with post-earnings-announcement drift (PEAD) \citep{bernard1989}. Earnings surprises rank among top predictors at weekly/monthly horizons \citep{schnaubelt2020}. Fusing prices, events, and news improves both accuracy and interpretability \citep{cheng2022}. Our work builds here by emphasizing earnings/event features under strict temporal evaluation.
+\paragraph{Integrating technical, earnings, and events} Structured earnings/event features add predictive power, consistent with post-earnings-announcement drift (PEAD) \citep{bernard1989}. Earnings surprises rank among top predictors at weekly/monthly horizons \citep{schnaubelt2020}. Fusing prices, events, and news improves both accuracy and interpretability \citep{cheng2022}. Our work builds here by emphasizing earnings/event features under strict temporal evaluation.
 
-\paragraph{Regimes and evaluation design.} Model efficacy shifts with market conditions per the Adaptive Markets Hypothesis \citep{lo2004}. Performance varies across COVID and post-COVID regimes and horizons \citep{zhang2023review}, motivating regime-aware evaluation and horizon-specific metrics.
+\paragraph{Regimes and evaluation design} Model efficacy shifts with market conditions per the Adaptive Markets Hypothesis \citep{lo2004}. Performance varies across COVID and post-COVID regimes and horizons \citep{zhang2023review}, motivating regime-aware evaluation and horizon-specific metrics.
 
-\paragraph{Gaps and contributions.} Few studies compare RNNs, transformers, and tabular models on identical features; structured earnings/event features are underused in deep models; and protocols sometimes risk look-ahead bias. We address these by (i) directly comparing RNNs, TFT, and tabular baselines on the same Dow 30 panel, (ii) incorporating technical plus earnings/event features, and (iii) using strict temporal splits with regime- and event-based slices.
+\paragraph{Gaps and contributions} Few studies compare RNNs, transformers, and tabular models on identical features; structured earnings/event features are underused in deep models; and protocols sometimes risk look-ahead bias. We address these by (i) directly comparing RNNs, TFT, and tabular baselines on the same Dow 30 panel, (ii) incorporating technical plus earnings/event features, and (iii) using strict temporal splits with regime- and event-based slices.
+
+\paragraph{Recent transformer \& multimodal trends} \rev{Patch-wise Transformers (e.g., PatchTST) markedly improve long-horizon time-series forecasting via local-context patches and longer effective memory} \citep{nie2023patchtst}, \rev{while TimesFM demonstrates zero-/few-shot forecasting from large-scale pretraining, suggesting that data scale and pretraining are key drivers of transformer gains} \citep{sen2024timesfm}. \rev{In finance, domain LLMs (BloombergGPT, FinGPT) and multimodal pipelines point to text+price integration as a promising route} \citep{wu2023bloomberggpt,yang2023fingpt}; \rev{our negative result for TFT on a small, daily panel aligns with this view---that Transformers often need more data and richer modalities to consistently outperform simpler sequence models.}
 
 
 
 \section{Data \& Experimental Design}
 	\textbf{Universe and splits.} We focus on the Dow 30 universe, employing a temporal split that reserves 2020 for validation and 2021--2024 for testing. This design allows us to evaluate model performance across different market regimes.
 
-	\textbf{Why these splits and horizons.} We forecast the three horizons \emph{repeatedly over time} (not a single multi-year step). The multi-year test window is intentional: (i) it spans distinct regimes, enabling a fair assessment of regime sensitivity; (ii) it increases statistical power and narrows CIs by aggregating many (date, ticker) predictions; and (iii) it prevents overfitting to a single year. The training window supplies several earnings cycles per ticker under comparatively stable microstructure, while reserving 2020 as a stressed, contiguous validation block (COVID) helps select hyperparameters that generalize under volatility spikes. The horizons reflect common use-cases, with the longest horizon intended to capture slower-moving effects (e.g., event drift) while averaging daily noise.
+	\textbf{Why these splits and horizons.} \simp{We make predictions at each time point (not just one long-term forecast). The multi-year test period serves three purposes: (i) it covers different market conditions, allowing us to test how models perform across regimes; (ii) it provides more data points, increasing our confidence in the results; and (iii) it prevents models from overfitting to a single year. The training period includes multiple earnings cycles per stock under relatively stable market conditions, while using 2020 (COVID) as validation helps us select models that work well during volatile periods. The three horizons represent common trading timeframes, with the 21-day horizon designed to capture slower effects like earnings drift while smoothing out daily noise.}
 % (Regime/event slices paragraph moved below)
 
 	\textbf{COVID-era allocation and external validity.} Isolating 2020 as validation encourages robustness without leaking into the multi-year test and mimics a realistic deployment as of Jan 2021.
 
-\textbf{Robustness and additional validation.} Our universe is the Dow 30 (frozen as of \texttt{2018-01-01}) to mitigate survivorship bias, but results may be index- and cap-segment specific. To strengthen generalization, we recommend and support: (i) rolling-origin backtests with expanding windows and an embargo to quantify time variation in performance; (ii) alternative contiguous splits (e.g., training 2016--2018, validating 2019, testing 2020--2024; or validating on 2021 and testing 2022--2024) to probe sensitivity to the COVID year placement; and (iii) cross-universe tests (e.g., S\&P 100) using the same feature pipeline. We prioritize contiguous, forward-only blocks over randomized CV because randomization breaks temporal dependence and can leak future information. While our main tables focus on a single, realistic deployment split for clarity, these robustness checks are straightforward extensions within the same code path and are left as planned follow-ups to avoid diluting the primary comparison.
+\textbf{Robustness and additional validation.} \simp{We use the Dow 30 (fixed as of 2018) to avoid survivorship bias, but our results may not apply to other stock universes or market segments. To test robustness, we suggest: (i) rolling evaluations with expanding training windows; (ii) different split points (like using 2019 for validation instead of 2020); and (iii) testing on other stock universes like the S\&P 100. We use time-ordered splits rather than random splits because random splits can leak future information and break the time dependencies that are crucial for financial data. We focus on one main split for clarity, but these robustness tests can be easily done with our code.}
 
     	\textbf{Targets.} The prediction targets are log returns $r_{t\to t+h} = \ln(P_{t+h}) - \ln(P_t)$ for the three horizons. Directional accuracy (\da{}) is the fraction of correct sign predictions: $\operatorname{DA} = \Pr[\operatorname{sign}(\hat r) = \operatorname{sign}(r)]$.
 
     	\textbf{Evaluation metrics.} We report \rmse{}, \rTwo{}, and \da{}; we avoid MAPE/sMAPE for daily returns due to near-zero denominators.
 
-        \textbf{Features.} We include a range of technical indicators (standard momentum signals, moving averages, volatility measures, oscillator indicators like RSI, etc.) as well as earnings and event features. Earnings features include the earnings surprise percentage, an indicator for whether earnings were announced after market close or before open (with values aligned to the next trading day), binary event flags for the days of earnings announcements, and days-to-next-earnings countdown features. Our comparison focuses on technical and earnings inputs; accordingly, all main experiments (EXP-A) are Tech+Earnings.
+    	\textbf{Features.} \simp{We include a range of technical indicators (standard momentum signals, moving averages, volatility measures, oscillator indicators like RSI, etc.) as well as earnings and event features. Earnings features include the earnings surprise percentage, an indicator for whether earnings were announced after market close or before open (with values aligned to the next trading day), binary event flags for the days of earnings announcements, and days-to-next-earnings countdown features. Our comparison focuses on technical and earnings inputs; accordingly, all main experiments (EXP-A) are Tech+Earnings. We intentionally restrict to structured technical + earnings features to isolate modeling effects rather than confounding with data breadth.}
 
     	\textbf{Leakage controls.} We take careful steps to avoid look-ahead bias. All after-market data (such as an earnings result announced after 4pm) is shifted to be only available from $t+1$ onward. We use contiguous forward-only blocks with a 5-day embargo between training, validation, and test periods to ensure no overlap or label leakage. All feature scaling (e.g., standardization) is fit on the train set only and applied to later sets.
 
-        \textbf{Global training.} All models are trained on a pooled panel that stacks all 30 tickers (i.e., each training sample is a (date, ticker) pair). The models therefore learn a single set of parameters across all series, leveraging cross-sectional information in addition to time-series patterns. This global modeling approach assumes that different stocks share some common dynamics that the model can learn.
+        \textbf{Global training.} \simp{We train all models on data from all 30 stocks combined (each training example is a specific date and stock). This means the models learn one set of parameters that applies to all stocks, using patterns both across time and across different stocks. This approach assumes that stocks share some common behavior that the models can learn.}
 
     	\textbf{Ablations.} At $h{=}21$ we compare Tech-only against Tech+Earnings: B1 (Tech) and B2 (Tech+Earnings) in \Cref{tab:ablation}. Representative models: XGBoost (tabular) and TFT (transformer). GRU/LSTM use the standard modality inputs and do not participate in the ablation table.
 
@@ -129,22 +152,26 @@ Approaches to multi-horizon financial forecasting (1-day, 1-week, 1-month) range
 	\textbf{Reproducibility.} We fix random seeds $\{42,43,44\}$ for all training runs and report averaged results. Sequence models use a lookback window of 60 trading days. Batch size is 256 (per the comparison pipeline). After hyperparameter selection on Val-2020, all model classes are refit on Train$+$Val and evaluated once on Test (2021--2024). For deep models (GRU/LSTM/TFT), refitting uses early stopping on a held-out contiguous slice within 2020 (forward-only) as the stop set; tabular models are simply retrained on Train$+$Val with tuned hyperparameters fixed across horizons.
 
 \section{Models}
-\textbf{Tabular models.} We evaluate three non-sequential approaches that treat each (ticker, date) as an independent feature vector: (1) \textit{Ridge} regression ($L_2$-regularized linear model), (2) \textit{Random Forest} (tree ensemble), and (3) \textit{XGBoost} (gradient boosted trees \citep{chen2016xgboost}). These models ignore sequential order (aside from derived features like momentum), providing a baseline for how static feature relationships predict returns. Each model is trained separately for each horizon $h$ with a single-target output.
+\textbf{Tabular models.} \simp{We test three models that treat each (stock, date) observation independently: (1) \textit{Ridge} regression (linear model with L2 regularization), (2) \textit{Random Forest} (ensemble of decision trees), and (3) \textit{XGBoost} (gradient boosted trees \citep{chen2016xgboost}). These models don't consider the time sequence directly (except through features like momentum), giving us a baseline for how well static relationships can predict returns. We train separate models for each time horizon.}
 
 \textbf{Sequence models.} We use Gated Recurrent Unit (\textit{GRU}) \citep{cho2014learning} and Long Short-Term Memory (\textit{LSTM}) \citep{hochreiter1997long} networks to capture temporal structure. Each processes the past 60 trading days for a stock to predict $r_{t\to t+h}$, with one output head per horizon. These models can learn patterns such as trends or mean reversion. Dropout and $L_2$ weight decay are applied to limit overfitting.
 
-\textbf{Transformer model.} We employ the Temporal Fusion Transformer (\textit{TFT}, \citealp{lim2021temporal}), an attention-based architecture for interpretable multi-horizon forecasting. TFT combines gated linear units and multi-head self-attention to integrate static attributes, known future inputs (e.g., calendar features), and historical observations. Unlike the RNNs trained per horizon, TFT predicts all horizons simultaneously via a multi-horizon output layer. Given our small daily panel, we constrained TFT capacity (fewer heads/layers, higher dropout) to mitigate overfitting.
+	\textbf{Transformer model.} \simp{We use the Temporal Fusion Transformer (\textit{TFT}, \citealp{lim2021temporal}), which uses attention mechanisms for multi-horizon forecasting. TFT combines different types of inputs (static features, historical data, and known future information like calendar features) using attention to focus on the most relevant information. Unlike the RNN models that we train separately for each horizon, TFT predicts all three horizons at once. Since our daily dataset is relatively small, we used a smaller TFT (fewer attention heads and layers, more dropout) to prevent overfitting.}
+
+\rev{\emph{Capacity \& regularization.} Because our daily dataset is small, we used a smaller TFT (fewer attention heads and layers, more dropout) to prevent overfitting. To ensure fairness, we tested larger TFT configurations with different regularization settings (details in Appendix B.2). While larger TFTs sometimes performed better on validation data, they didn't show consistent improvements on test data for the 21-day horizon. Therefore, we stick with the smaller configuration for our main results.}
+
+\rev{We constrained TFT capacity (fewer layers/heads) to reduce overfitting on a small daily dataset. Results should therefore be read conditional on this conservative setting. Higher-capacity or pretrained Transformers may perform better under richer data or modalities, which we leave for future work.}
 
 
 \begin{figure}[t]
     \centering
     % Include figure if available; otherwise show a placeholder to avoid compilation errors.
     \IfFileExists{figs/tft_architecture.png}{\includegraphics[width=0.98\columnwidth]{figs/tft_architecture.png}}{\fbox{Missing figure: figs/tft_architecture.png}}
-    \caption{TFT architecture showing how static metadata, observed historical inputs, and known future inputs enter the model through different pathways before fusion via multi-head attention.}
+    \caption{TFT architecture showing how static metadata, observed historical inputs, and known future inputs enter the model through different pathways before fusion via multi-head attention. \rev{Blocks represent encoders for static features, known future covariates, and observed history; the fused representation feeds multi-horizon output heads for $h\in\{1,5,21\}$.} \rev{We use a compact configuration (1 layer, 4 heads) to prevent overfitting on the daily panel.}}
     \label{fig:tft_architecture}
 \end{figure}
 
-Hyperparameters for all models were selected based on the 2020 validation set (primarily tuning on the $h=21$ case) and are detailed in Appendix B. Notably, the TFT required careful tuning of learning rate and regularization strength due to its complexity, and simpler architectures like the RNNs were less prone to overfit given the data volume. TFT is trained with a multi-horizon head, whereas RNNs/tabular baselines are trained separately per horizon; we favor realism in how these models are typically used over identical objective forms.
+Hyperparameters for all models were chosen based on 2020 validation performance (focusing mainly on the 21-day horizon) and are detailed in Appendix B. \simp{The TFT needed more careful tuning of learning rate and regularization because of its complexity, while simpler models like RNNs were less likely to overfit given our data size. TFT predicts multiple horizons at once, while RNNs and tabular models are trained separately for each horizon; we chose this approach to match how these models are typically used in practice.}
 
 \section{Results}
 
@@ -156,7 +183,7 @@ At $h=1$, the LSTM attains the lowest RMSE (0.01622), narrowly outperforming GRU
     \centering
     % Include figure if available; otherwise show a placeholder to avoid compilation errors.
     \IfFileExists{../comparison/artifacts/figures/fig1_da_by_horizon.png}{\includegraphics[width=0.98\columnwidth]{../comparison/artifacts/figures/fig1_da_by_horizon.png}}{\fbox{Missing figure: fig1_da_by_horizon.png}}
-    \caption{Directional accuracy by model and horizon on the test set (setup in Abstract). Sequence models (LSTM/GRU) particularly gain an edge at $h{=}21$.}
+    \caption{Directional accuracy by model and horizon on the test set (setup in Abstract). Sequence models (LSTM/GRU) particularly gain an edge at $h{=}21$. \rev{Bars show \da{} (higher is better) for $h\in\{1,5,21\}$, averaged over three random seeds.} \rev{LSTM/GRU improve from roughly 51–52\% at $h{=}1$ to about 55\% at longer horizons, while tabular baselines (Ridge, Random Forest, XGBoost) change little or degrade slightly relative to RNNs; TFT is competitive but does not lead.} \rev{This pattern suggests temporal sequence models benefit more from longer context when predicting multi-week moves, whereas purely tabular models capture less horizon-dependent signal.}}
     \label{fig:da_by_horizon}
 \end{figure}
 
@@ -164,7 +191,7 @@ At $h=1$, the LSTM attains the lowest RMSE (0.01622), narrowly outperforming GRU
 
 \begin{table*}[t]
     \centering
-    \caption{Main results on the test set (setup in Abstract). Each cell shows mean $\pm$ std over 3 random seeds unless otherwise noted. \rTwo{} is calculated against a zero-return baseline. Metrics computed from our aggregated results file (\texttt{Table1\_EXP-A.csv}).}
+    \caption{Table I (Main results). Each cell shows mean $\pm$ std over 3 random seeds unless otherwise noted. \rTwo{} vs zero-return baseline. Metrics computed from our aggregated results file (\texttt{Table1\_EXP-A.csv}). \rev{LSTM is best at $h{=}21$ (lowest RMSE 0.05084; highest DA 55.0\%), while Ridge wins $h{=}5$ (RMSE 0.03651), and RF tops DA at $h{=}1$ (51.9\%). TFT is competitive but does not dominate on this daily panel.}}
     \label{tab:main_results}
     \sisetup{round-mode=places,round-precision=6}
     \begin{tabular}{llccc}
@@ -196,7 +223,7 @@ At $h=1$, the LSTM attains the lowest RMSE (0.01622), narrowly outperforming GRU
     \footnotesize{\rmse{} in log-return units; \rTwo{} vs zero-return baseline; \da{} = hit rate on sign. Entries without $\pm$ denote single run; no variance.}
 \end{table*}
 
-Ridge's win at $h=5$ suggests much of the weekly signal is approximately linear in our engineered features.
+\simp{Ridge's $h=5$ win suggests the weekly signal is well captured by a regularized linear mix of technicals.}
 
 \subsection{Hypothesis Evaluation}
 
@@ -245,13 +272,13 @@ Overall, models are sensitive to both market period (sequence models thrive in r
     \centering
     % Include figure if available; otherwise show a placeholder to avoid compilation errors.
     \IfFileExists{../comparison/artifacts/figures/fig2_regime_rmse_heatmap.png}{\includegraphics[width=0.98\columnwidth]{../comparison/artifacts/figures/fig2_regime_rmse_heatmap.png}}{\fbox{Missing figure: fig2_regime_rmse_heatmap.png}}
-    \caption{Test \rmse{} by model in two distinct market regimes: the 2022 bear market (left) and the 2023--24 rally (right). Darker shading indicates lower error. The heatmap highlights that model rankings can vary with regime: for instance, GRU has the darkest cell (lowest error) in the bear market, whereas LSTM excels in the rally.}
+    \caption{Test \rmse{} by model in two distinct market regimes: the 2022 bear market (left) and the 2023--24 rally (right). Darker shading indicates lower error. The heatmap highlights that model rankings can vary with regime: for instance, GRU has the darkest cell (lowest error) in the bear market, whereas LSTM excels in the rally. \rev{Each cell is the $h{=}21$ \rmse{} computed on the test split restricted to the indicated period; colors are normalized within each panel.} \rev{Errors rise for all models in 2022 (high volatility) and fall in 2023–24, with the best model switching from GRU (bear) to LSTM (rally), underscoring regime sensitivity and the value of regime-aware model selection.}}
     \label{fig:regime_heatmap}
 \end{figure}
 
 \begin{table}[t]
     \centering
-    \caption{Best models by regime at $h=21$ (test).}
+    \caption{Best models by regime at $h{=}21$ (test). \rev{GRU is best on RMSE in the 2022 bear; LSTM best in the 2023--24 rally with top DA tied.}}
     \label{tab:regimes}
     {\setlength{\tabcolsep}{4pt}\small
     \resizebox{\columnwidth}{!}{%
@@ -285,28 +312,34 @@ Overall, models are sensitive to both market period (sequence models thrive in r
 
 \subsection{Hypothesis Implications}
 
-Our hypothesis-driven evaluation yields three main insights on transformer efficacy in financial time series. First, H1 (TFT superiority) is rejected: on a constrained daily panel with technical and earnings features, attention mechanisms do not automatically improve prediction. LSTM's edge at \(h=21\) (over TFT) likely reflects a simpler inductive bias better matched to the low signal-to-noise ratio in daily returns.
+\simp{Our hypothesis testing reveals three key insights about transformer effectiveness in financial prediction. First, H1 (TFT superiority) was rejected: on our daily dataset with technical and earnings features, attention mechanisms don't automatically improve predictions. LSTM's advantage at the 21-day horizon likely comes from having a simpler structure that's better suited to the noisy nature of daily returns.
 
-Second, H2 (event features) holds, but timing matters. The ablation shows modest gains (+1.1\,pp \da{} for TFT), whereas leveraging explicit earnings windows drives a larger effect (+7.5\,pp \da{}; 61.4\% vs.\ 53.9\%), indicating that concentrating signal around events beats diluting it across all days (with a slight RMSE trade-off: 0.0695 vs.\ 0.0666).
+Second, H2 (event features help) was confirmed, but timing is crucial. The basic comparison shows modest gains (+1.1 percentage points in directional accuracy for TFT), but focusing specifically on earnings announcement periods drives much larger improvements (+7.5 percentage points; 61.4\% vs 53.9\% accuracy). This suggests that concentrating the signal around key events works better than spreading it across all days, though with a slight increase in prediction error due to higher volatility.
 
-Third, H3 (regime dependence) is confirmed: no single model dominates across markets. Sequence models (LSTM/GRU) excel in rallies but falter in bears; \da{} dipped below 50\% in 2022, suggesting supervised models trained on historical patterns can struggle under acute stress. This favors ensembles or regime-switching approaches.
+Third, H3 (regime dependence) was confirmed: no single model performs best across all market conditions. Sequence models (LSTM/GRU) work well during bull markets but struggle in bear markets; directional accuracy fell below 50\% in 2022, showing that models trained on historical patterns can fail during market stress. This supports using ensemble methods or regime-switching approaches.
 
-Overall, at daily frequency and a small universe, simpler models can match or beat more complex ones. LSTM/GRU (fewer parameters) rival TFT here---excess capacity can hinder training or overfit sparse signals. Tabular methods remain strong: Ridge attains the lowest \rmse{} at \(h=5\), implying a regularized linear mix of technicals captures much of the limited weekly predictability, while deep models better capture directional patterns (e.g., trend persistence) at \(h=21\).
+For this daily dataset and small stock universe, simpler models can match or beat more complex ones. LSTM and GRU (with fewer parameters) perform as well as TFT here—having too many parameters can hurt training when signals are weak. Traditional methods remain competitive: Ridge regression achieved the best error rate at the 5-day horizon, suggesting that a simple linear combination of technical indicators captures much of the available weekly predictability. Deep models are better at capturing directional patterns (like trend persistence) at the 21-day horizon.
 
-All models leave most variance unexplained (\rTwo{}\(\approx 0\)), which is consistent with efficient-market arguments. Small edges still matter: \(\sim\)55\% \da{} at \(h=21\) (LSTM) could be economically meaningful if paired with a trading strategy---outside our scope---but only if it generalizes, hence our strict temporal holdout.
+All models explain very little of the total variance (R² $\approx$ 0), which aligns with efficient market theory. However, small improvements still matter: achieving ~55\% directional accuracy at the 21-day horizon (LSTM) could be economically meaningful in trading strategies, though this is outside our current scope and depends on whether the results hold up in practice.}
 
-\textit{Practical guidance.} (i) For very short horizons (daily), start with linear or tree models plus well-chosen features; complex sequence models may not help. (ii) For monthly horizons, RNNs (LSTM) better capture directional swings. (iii) Transformers (e.g., TFT) are more promising with richer covariates or larger cross-sections (their comparative advantage is multimodal fusion and long-range dependencies).
+\textbf{Practical guidance.} (i) For daily predictions, start with linear models or tree ensembles combined with well-designed features; complex sequence models may not provide additional value. (ii) For monthly predictions, RNNs (especially LSTM) are better at capturing directional trends. (iii) Transformers (like TFT) show more promise when you have richer data types or larger datasets, since their strength lies in combining multiple data sources and capturing long-range patterns.
+
+\subsection{Economic Significance}\label{sec:econ}
+	\rev{\textbf{Economic significance (no backtesting here).} We focus on statistical accuracy (RMSE, $R^2$, DA) but don't test whether our predictions would actually make money. In practice, profitability depends on trading costs, slippage, how often you trade, and position sizing. A complete evaluation would combine predictions with a trading strategy, measure profit and loss, Sharpe ratio, maximum drawdown, and test sensitivity to transaction costs. We leave this for future work and note that statistical improvements may not survive real trading costs, especially for daily trading.}
+
+\subsection{Compute \& Efficiency}\label{sec:compute}
+    \rev{\textbf{Compute \& efficiency.} Model complexity varies significantly across architectures. Ridge regression is the most efficient (minimal parameters, seconds to train). Random Forest uses 100 trees with max depth 5 ($\sim$10k effective parameters). XGBoost employs max depth 3, learning rate 0.1, 100 boosting rounds. LSTM/GRU models use 1 layer with 64 hidden units ($\sim$25k parameters), training with Adam at learning rate $1\times10^{-3}$ for up to 10 epochs with early stopping. TFT is the most complex: 4 attention heads, 1 transformer layer, hidden dimensionality 16, dropout 0.3, totaling $\approx$50k parameters, trained with learning rate $3\times10^{-4}$. Training time scales accordingly: tabular models (Ridge/XGBoost) train in minutes, sequence models (LSTM/GRU) require hours, and TFT incurs the highest computational cost. Given the small daily panel and batch size of 256, simpler models deliver competitive accuracy at substantially lower computational cost, favoring rapid retraining and deployment scenarios.}
 
 
-\textbf{Limitations and threats to validity.} Scope is limited to the Dow 30 and daily data; we did not include unstructured/alternative modalities or test cross-universe generalization. Despite temporal splits and purging, overlapping multi-horizon targets introduce dependence. Our tuning budget was modest, which can favor simpler models. Comparing single-horizon tabular/RNN models to multi-horizon TFT raises fairness concerns; we trained separate single-horizon variants where feasible and note residual differences. Future work includes richer covariates (e.g., sentiment, macro), alternative objectives (e.g., quantile loss), reinforcement-learning policies, and interpretability analyses (e.g., TFT attention, SHAP) to clarify drivers across regimes.
+	\rev{\textbf{Limitations and threats to validity.} Our study is limited to large U.S. stocks (Dow 30) at daily frequency; results may not apply to small companies, international markets, or higher-frequency data where market structure and liquidity are different. We kept the scope narrow to focus on methodological differences, but this limits how broadly our findings apply. We analyze bear (2022) versus bull (2023-2024) markets but don't separately examine extreme events like market crashes. Models trained on historical data often fail during such extremes; future work should test performance during the most volatile periods. Our hyperparameter tuning was limited, which may favor simpler models. Comparing single-horizon models (tabular/RNN) to multi-horizon TFT raises fairness questions, though we tried to address this where possible. Future research should include richer data types (sentiment, macroeconomic data), different loss functions, and interpretability analysis to understand what drives performance in different market conditions.}
 
 
 \section{Conclusion}
-We benchmarked transformer, recurrent, and traditional models for multi-horizon stock return prediction on the Dow 30 using technical and earnings features under a strict time split. Findings are: (H1) on this daily, data-constrained panel, transformers did not dominate---LSTM performed best at the 21-day horizon (lowest \rmse{}, highest \da{}); (H2) earnings/event features add value, especially within \(\pm\)3-day earnings windows (+7.5\,pp \da{}); and (H3) model rankings are regime-dependent---sequence models fare better in bullish trends and struggle in bear markets.
+\simp{We compared transformer, recurrent, and traditional models for predicting stock returns at three time horizons on the Dow 30, using technical and earnings features with strict time-based splits. Our main findings are: (H1) on this daily dataset, transformers did not outperform simpler models—LSTM performed best at the 21-day horizon; (H2) earnings features improve predictions, especially within 3 days of earnings announcements (+7.5 percentage points in directional accuracy); and (H3) model performance depends on market conditions—sequence models work better during bull markets and struggle during bear markets.
 
-Across horizons, Ridge achieved the best 5-day \rmse{}, and Random Forest led 1-day \da{}. Thus, well-tuned simpler models can rival or surpass more complex ones in this setting. This negative result for (H1) tempers assumptions about architectural complexity without ruling out transformer gains on larger universes or with richer covariates.
+Across all horizons, Ridge regression achieved the best 5-day error rate, and Random Forest led 1-day directional accuracy. This shows that well-tuned simple models can match or beat complex ones in this setting. Our negative result for transformer superiority suggests we shouldn't assume complex architectures always perform better, though transformers might excel with larger datasets or richer data types.
 
-We offer these results as a baseline: future work should compare against these controls under similar splits and features, and test whether alternative data or higher-frequency signals allow architectures like TFT to exceed where simpler models plateau.
+These results provide a baseline for future comparisons: researchers should test their methods against these benchmarks using similar data splits and features, and investigate whether alternative data or higher-frequency signals allow transformers to outperform where simpler models reach their limits.}
 
 
 \subsection*{Future Work}

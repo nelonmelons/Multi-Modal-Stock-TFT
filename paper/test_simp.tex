@@ -1,0 +1,33 @@
+\documentclass{IEEEtran}
+\usepackage{natbib}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{cleveref}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{soul}
+\usepackage{ulem}
+\usepackage{changes}
+
+% Custom macros
+\newcommand{\rev}[1]{\underline{#1}}
+\newcommand{\simp}[1]{\textit{#1}}
+
+\begin{document}
+
+\title{Test Document}
+\author{Test Author}
+\maketitle
+
+\section{Introduction}
+This is a test to check if \simp{This is simplified text that should be italicized.} works properly.
+
+Another test: \simp{This is a longer simplified text block that spans multiple lines and should test whether there are any issues with the textit formatting when used inside the simp macro.}
+
+\end{document}
