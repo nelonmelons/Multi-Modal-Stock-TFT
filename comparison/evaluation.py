@@ -48,10 +48,7 @@ def evaluate_multi_horizon_predictions(model, data_module, horizons: List[int] =
             if device:
                 features, targets = features.to(device), targets.to(device)
             # Forward
-            if hasattr(model, 'news_dim') and getattr(model, 'news_dim', 0) > 0:
-                predictions = model(features, news=None)
-            else:
-                predictions = model(features)
+            predictions = model(features)
             pred_np = predictions.detach().cpu().numpy() if device else predictions.numpy()
             target_np = targets.detach().cpu().numpy() if device else targets.numpy()
             all_predictions.append(pred_np)

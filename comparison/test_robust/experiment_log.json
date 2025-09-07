@@ -1,0 +1,109 @@
+{
+  "timestamp": "2025-09-07T18:46:11.724671",
+  "universe": [
+    "AAPL",
+    "MSFT"
+  ],
+  "date_contract": {
+    "train": [
+      "2023-01-01",
+      "2023-06-30"
+    ],
+    "val": [
+      "2023-07-01",
+      "2023-09-30"
+    ],
+    "test": [
+      "2023-10-01",
+      "2023-12-31"
+    ]
+  },
+  "horizons": [
+    1,
+    5
+  ],
+  "lookback": 30,
+  "predict_len": 21,
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "feature_schema_example": [
+    "symbol",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "bid",
+    "ask",
+    "sma_10",
+    "sma_50",
+    "sma_200",
+    "ema_12",
+    "ema_26",
+    "rsi_14",
+    "macd_line",
+    "macd_signal",
+    "macd_hist",
+    "bb_upper",
+    "bb_middle",
+    "bb_lower",
+    "atr_14",
+    "volume_sma",
+    "volume_ratio",
+    "price_change",
+    "price_change_5d",
+    "price_change_20d",
+    "volatility_20d",
+    "high_20d",
+    "low_20d",
+    "price_position",
+    "time_idx",
+    "day_of_week",
+    "month",
+    "quarter",
+    "day_of_month",
+    "is_weekend",
+    "is_holiday",
+    "days_to_next_earnings",
+    "days_since_earnings",
+    "is_earnings_day",
+    "earnings_in_prediction_window",
+    "days_to_earnings_in_window",
+    "eps_estimate",
+    "eps_actual",
+    "revenue_estimate",
+    "revenue_actual",
+    "days_to_next_split",
+    "is_split_day",
+    "days_to_next_dividend"
+  ],
+  "baseline_params": {
+    "Ridge": {
+      "alpha": 1.0
+    },
+    "RandomForest": {
+      "n_estimators": 300,
+      "max_depth": 10,
+      "min_samples_leaf": 1,
+      "random_state": 44
+    },
+    "XGBoost": {
+      "n_estimators": 800,
+      "learning_rate": 0.03,
+      "max_depth": 6,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_lambda": 1
+    }
+  },
+  "package_versions": {
+    "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+    "pandas": "2.3.1",
+    "numpy": "1.26.4",
+    "torch": "2.6.0+cu124"
+  }
+}

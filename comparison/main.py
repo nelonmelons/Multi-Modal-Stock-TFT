@@ -4,7 +4,7 @@ Leakage-Free Stock Data Loading and Analysis System
 
 This script demonstrates a proper temporal data pipeline for stock prediction that:
 1. Prevents data leakage by enforcing strict temporal boundaries
-2. Integrates multiple data sources (stock prices, news, events, FRED economic data)
+2. Integrates multiple data sources (stock prices, events, FRED economic data)
 3. Creates proper train/validation splits with lookahead buffer
 4. Generates comprehensive data tables for analysis
 
@@ -30,7 +30,6 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from dataModule.datamodule import NumericDataModule
 from dataModule.fetch_stock import fetch_stock_data
 from dataModule.fetch_events import fetch_events_data
-from dataModule.fetch_news import fetch_news_embeddings
 from dataModule.fetch_fred import fetch_fred_data
 from dataModule.compute_ta import compute_technical_indicators
 from dataModule.build_features import build_features
@@ -64,6 +63,7 @@ class LeakageFreeDataLoader:
         Initialize the data loader with configuration parameters.
         """
         self.config = config
+        self.horizons = self.config.get('horizons', HORIZONS)
         self.validate_config()
         self.cache = DataCache(cache_dir="cache")
         self.setup_temporal_boundaries()
@@ -72,7 +72,6 @@ class LeakageFreeDataLoader:
         self.data_module = None
         self.val_df = None
         self.test_df = None
-        self.horizons = self.config.get('horizons', HORIZONS)
     
     def validate_config(self):
         """Validate configuration against global experiment contract."""
@@ -92,18 +91,19 @@ class LeakageFreeDataLoader:
         print("✅ Configuration validated successfully")
     
     def setup_temporal_boundaries(self):
-        """Use fixed Train/Val/Test windows with embargo/purge guard awareness."""
-        self.train_start = TRAIN_START
-        self.train_end = TRAIN_END
-        self.val_start = VAL_START
-        self.val_end = VAL_END
-        self.test_start = TEST_START
-        self.test_end = TEST_END
-        print("🔒 Temporal Boundaries (Fixed Contract):")
+        """Use Train/Val/Test windows from config with embargo/purge guard awareness."""
+        # Use config values if available, otherwise fall back to hardcoded constants
+        self.train_start = self.config.get('train_start', TRAIN_START)
+        self.train_end = self.config.get('train_end', TRAIN_END)
+        self.val_start = self.config.get('val_start', VAL_START)
+        self.val_end = self.config.get('val_end', VAL_END)
+        self.test_start = self.config.get('test_start', TEST_START)
+        self.test_end = self.config.get('test_end', TEST_END)
+        print("🔒 Temporal Boundaries (From Config):")
         print(f"   Train: {self.train_start} → {self.train_end}")
         print(f"   Val:   {self.val_start} → {self.val_end}")
         print(f"   Test:  {self.test_start} → {self.test_end}")
-        print(f"   Embargo: {EMBARGO_DAYS} trading days; Purge: up to max(h)={max(HORIZONS)} days")
+        print(f"   Embargo: {EMBARGO_DAYS} trading days; Purge: up to max(h)={max(self.horizons)} days")
         print()
     
     def fetch_all_data_sources(self):
@@ -130,18 +130,8 @@ class LeakageFreeDataLoader:
                 fetch_func=lambda symbols, start, end, earnings_key, ninjas_key: fetch_events_data(symbols, start, end, None, ninjas_key)
             )
             print(f"   Events data fetched")
-            # 3. News
-            print("3️⃣ Fetching news sentiment embeddings...")
-            self.raw_data['news'] = self.cache.get_or_fetch_news_data(
-                symbols=self.config['symbols'],
-                start=self.config['start_date'], 
-                end=self.config['end_date'],
-                api_key=self.config.get('news_api_key'),
-                fetch_func=lambda symbols, start, end, api_key: fetch_news_embeddings(symbols, start, end, api_key)
-            )
-            print(f"   News data shape: {self.raw_data['news'].shape}")
-            # 4. FRED
-            print("4️⃣ Fetching FRED economic indicators...")
+            # 3. FRED
+            print("3️⃣ Fetching FRED economic indicators...")
             self.raw_data['fred'] = self.cache.get_or_fetch_fred_data(
                 start=self.config['start_date'], 
                 end=self.config['end_date'],
@@ -149,8 +139,8 @@ class LeakageFreeDataLoader:
                 fetch_func=lambda start, end, api_key: fetch_fred_data(start, end, api_key)
             )
             print(f"   FRED data shape: {self.raw_data['fred'].shape}")
-            # 5. Technicals
-            print("5️⃣ Computing technical indicators...")
+            # 4. Technicals
+            print("4️⃣ Computing technical indicators...")
             self.raw_data['technical'] = self.cache.get_or_fetch_ta_data(
                 stock_df=self.raw_data['stock'],
                 fetch_func=lambda stock_df: compute_technical_indicators(stock_df)
@@ -165,10 +155,13 @@ class LeakageFreeDataLoader:
         """Build features with strict temporal constraints."""
         print("🔧 Building Temporal-Safe Feature Matrix...")
         try:
+            # Create empty news DataFrame for compatibility
+            empty_news_df = pd.DataFrame()
+            
             self.processed_data['features'] = self.cache.get_or_build_features(
                 stock_df=self.raw_data['stock'],
                 events=self.raw_data['events'],
-                news_df=self.raw_data['news'],
+                news_df=empty_news_df,
                 ta_df=self.raw_data['technical'],
                 fred_df=self.raw_data['fred'],
                 encoder_len=self.config['encoder_len'],
@@ -247,7 +240,6 @@ def main():
         'encoder_len': 60,
         'predict_len': 21,
         'batch_size': 256,
-        'news_api_key': os.getenv('NEWS_API_KEY'),
         'fred_api_key': os.getenv('FRED_API_KEY'),
         'api_ninjas_key': os.getenv('API_NINJAS_KEY'),
         'horizons': HORIZONS,

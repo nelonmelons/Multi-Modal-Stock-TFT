@@ -200,6 +200,9 @@ class NumericDataModule:
         _, self.test_loader = self._to_loaders(train_df, test_df)
 
         # Combined Train+Val for final training
+        # ⚠️  WARNING: trainval_loader should ONLY be used for final model training
+        # AFTER hyperparameter tuning is complete. Using it during model selection
+        # would cause data leakage since val data was used for hyperparameter tuning.
         trainval_df = pd.concat([train_df, val_df], ignore_index=True).sort_values(self.date_col)
         self.trainval_loader, _ = self._to_loaders(trainval_df, test_df)
 

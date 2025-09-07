@@ -14,9 +14,10 @@ import pandas as pd
 import numpy as np
 from model.tft_model import setup_device
 
-def train_model(model, data_module, epochs=20, lr=0.001, device=None):
+def train_model(model, data_module, epochs=20, lr=0.001, device=None, patience=5):
     """
-    Simple training function for the model comparison pipeline.
+    Training function with early stopping to prevent overfitting.
+    ✅ FIXED: Now includes early stopping based on validation loss.
     
     Args:
         model: The PyTorch model to train
@@ -24,6 +25,7 @@ def train_model(model, data_module, epochs=20, lr=0.001, device=None):
         epochs: Number of training epochs
         lr: Learning rate
         device: PyTorch device to use (if None, will auto-detect)
+        patience: Early stopping patience (epochs to wait for improvement)
     
     Returns:
         Tuple of (trained_model, history)
@@ -37,6 +39,9 @@ def train_model(model, data_module, epochs=20, lr=0.001, device=None):
     criterion = nn.MSELoss()
     
     history = {'train_loss': [], 'val_loss': []}
+    best_val_loss = float('inf')
+    patience_counter = 0
+    best_model_state = None
     
     for epoch in range(epochs):
         # Training phase
@@ -85,22 +90,41 @@ def train_model(model, data_module, epochs=20, lr=0.001, device=None):
         history['train_loss'].append(avg_train_loss)
         history['val_loss'].append(avg_val_loss)
         
+        # ✅ FIXED: Early stopping based on validation loss
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            patience_counter = 0
+            best_model_state = model.state_dict().copy()
+        else:
+            patience_counter += 1
+        
         if epoch % 5 == 0:
             print(f"Epoch {epoch+1}: Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
+        
+        # Early stopping
+        if patience_counter >= patience:
+            print(f"✅ Early stopping at epoch {epoch+1} (patience={patience})")
+            break
+    
+    # Restore best model state
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        print(f"✅ Restored best model (val_loss={best_val_loss:.4f})")
     
     return model, history
 
-def train_tft_model(model, data_module, news_data=None, epochs=10, lr=0.001, device=None):
+def train_tft_model(model, data_module, epochs=10, lr=0.001, device=None, patience=5):
     """
-    Train a TFT model with optional news data.
+    Train a TFT model with early stopping.
+    ✅ FIXED: Added early stopping to prevent overfitting.
     
     Args:
         model: TFT model to train
         data_module: Data module with train/val loaders
-        news_data: Optional news data tensor (batch_size, news_features)
         epochs: Number of training epochs
         lr: Learning rate
         device: Training device
+        patience: Early stopping patience
     
     Returns:
         Trained model and training history
@@ -113,28 +137,9 @@ def train_tft_model(model, data_module, news_data=None, epochs=10, lr=0.001, dev
     criterion = nn.MSELoss()
     
     history = {'train_loss': [], 'val_loss': []}
-    
-    # Convert news data to tensor if provided
-    if news_data is not None:
-        if isinstance(news_data, pd.DataFrame):
-            # Filter only numeric columns and handle object types
-            numeric_cols = news_data.select_dtypes(include=[np.number]).columns
-            if len(numeric_cols) > 0:
-                news_tensor = torch.tensor(news_data[numeric_cols].values, dtype=torch.float32).to(device)
-                print(f"   Using {len(numeric_cols)} numeric news features out of {len(news_data.columns)} total")
-            else:
-                print("   No numeric news features found, training without news data")
-                news_tensor = None
-        else:
-            # Handle numpy array
-            try:
-                news_tensor = torch.tensor(news_data, dtype=torch.float32).to(device)
-            except (TypeError, ValueError) as e:
-                print(f"   Could not convert news data to tensor: {e}")
-                print("   Training without news data")
-                news_tensor = None
-    else:
-        news_tensor = None
+    best_val_loss = float('inf')
+    patience_counter = 0
+    best_model_state = None
     
     for epoch in range(epochs):
         # Training phase
@@ -146,25 +151,8 @@ def train_tft_model(model, data_module, news_data=None, epochs=10, lr=0.001, dev
             
             optimizer.zero_grad()
             
-            # Get corresponding news data for this batch if available
-            batch_news = None
-            if news_tensor is not None:
-                batch_size = features.size(0)
-                # Simple approach: use first batch_size rows of news data
-                # In practice, you'd want to match by date/symbol
-                start_idx = batch_idx * batch_size
-                end_idx = min(start_idx + batch_size, news_tensor.size(0))
-                if start_idx < news_tensor.size(0):
-                    actual_batch_size = end_idx - start_idx
-                    batch_news = news_tensor[start_idx:end_idx]
-                    
-                    # If we don't have enough news data, repeat the last row
-                    if actual_batch_size < batch_size:
-                        padding = news_tensor[-1:].repeat(batch_size - actual_batch_size, 1)
-                        batch_news = torch.cat([batch_news, padding], dim=0)
-            
-            # Forward pass with news data
-            outputs = model(features, news=batch_news)
+            # Forward pass without news data
+            outputs = model(features)
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
@@ -181,21 +169,7 @@ def train_tft_model(model, data_module, news_data=None, epochs=10, lr=0.001, dev
             for batch_idx, (features, targets) in enumerate(data_module.val_loader):
                 features, targets = features.to(device), targets.to(device)
                 
-                # Get corresponding news data for validation batch
-                batch_news = None
-                if news_tensor is not None:
-                    batch_size = features.size(0)
-                    start_idx = batch_idx * batch_size
-                    end_idx = min(start_idx + batch_size, news_tensor.size(0))
-                    if start_idx < news_tensor.size(0):
-                        actual_batch_size = end_idx - start_idx
-                        batch_news = news_tensor[start_idx:end_idx]
-                        
-                        if actual_batch_size < batch_size:
-                            padding = news_tensor[-1:].repeat(batch_size - actual_batch_size, 1)
-                            batch_news = torch.cat([batch_news, padding], dim=0)
-                
-                outputs = model(features, news=batch_news)
+                outputs = model(features)
                 loss = criterion(outputs, targets)
                 val_loss += loss.item()
         
@@ -204,8 +178,26 @@ def train_tft_model(model, data_module, news_data=None, epochs=10, lr=0.001, dev
         history['train_loss'].append(avg_train_loss)
         history['val_loss'].append(avg_val_loss)
         
+        # ✅ FIXED: Early stopping for TFT
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            patience_counter = 0
+            best_model_state = model.state_dict().copy()
+        else:
+            patience_counter += 1
+        
         if epoch % 5 == 0:
             print(f"Epoch {epoch+1}: Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
+        
+        # Early stopping
+        if patience_counter >= patience:
+            print(f"✅ Early stopping at epoch {epoch+1} (patience={patience})")
+            break
+    
+    # Restore best model state
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        print(f"✅ Restored best TFT model (val_loss={best_val_loss:.4f})")
     
     return model, history
 
@@ -427,12 +419,7 @@ def get_predictions(model, dataloader, val_df=None):
             features = features.to(device)
             
             # Handle both TFT and regular models
-            if hasattr(model, 'news_dim') and model.news_dim > 0:
-                # TFT model - provide None for news data since it's embedded in features
-                output = model(features, news=None)
-            else:
-                # Regular model
-                output = model(features)
+            output = model(features)
             
             # Store predictions
             predictions.extend(output.cpu().numpy())

@@ -33,11 +33,15 @@ class TabularResult:
     predictions: pd.DataFrame
 
 
-def _make_model(name: str, params: Optional[Dict]=None):
+def _make_model(name: str, params: Optional[Dict]=None, random_state: Optional[int]=None):
     params = params or {}
     if name.lower() == 'ridge':
+        # Ridge is deterministic, but we pass random_state for consistency
         model = Ridge(**params)
     elif name.lower() == 'randomforest':
+        # Add random_state for reproducible randomness across seeds
+        if 'random_state' not in params and random_state is not None:
+            params['random_state'] = random_state
         model = RandomForestRegressor(**params)
     elif name.lower() == 'xgboost':
         if not HAS_XGB:
@@ -45,6 +49,9 @@ def _make_model(name: str, params: Optional[Dict]=None):
         # Sensible defaults; caller may override
         default = dict(n_estimators=400, learning_rate=0.05, max_depth=4, subsample=0.8, colsample_bytree=0.8, reg_lambda=1)
         default.update(params)
+        # Add random_state for reproducible randomness across seeds
+        if 'random_state' not in default and random_state is not None:
+            default['random_state'] = random_state
         model = XGBRegressor(**default, objective='reg:squarederror', n_jobs=4, tree_method='hist')
     else:
         raise ValueError(f"Unknown baseline model: {name}")
@@ -61,6 +68,7 @@ def fit_predict_baseline(
     horizons: List[int],
     feature_cols: Optional[List[str]] = None,
     model_params: Optional[Dict[str, Dict]] = None,
+    random_state: Optional[int] = None,
 ) -> TabularResult:
     """
     Fit a tabular baseline separately for each horizon and produce predictions/metrics.
@@ -92,7 +100,7 @@ def fit_predict_baseline(
         y_train = train_df[y_col].values
         y_test = test_df[y_col].values if y_col in test_df.columns else np.full(len(test_df), np.nan)
 
-        pipe = _make_model(model_name, params=model_params.get(model_name, {}))
+        pipe = _make_model(model_name, params=model_params.get(model_name, {}), random_state=random_state)
         pipe.fit(X_train, y_train)
         y_pred = pipe.predict(X_test_base)
 
