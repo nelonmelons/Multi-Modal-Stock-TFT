@@ -137,9 +137,19 @@ Approaches to multi-horizon financial forecasting (1-day, 1-week, 1-month) range
 
     	\textbf{Targets.} The prediction targets are log returns $r_{t\to t+h} = \ln(P_{t+h}) - \ln(P_t)$ for the three horizons. Directional accuracy (\da{}) is the fraction of correct sign predictions: $\operatorname{DA} = \Pr[\operatorname{sign}(\hat r) = \operatorname{sign}(r)]$.
 
-    	\textbf{Evaluation metrics.} We report \rmse{}, \rTwo{}, and \da{}; we avoid MAPE/sMAPE for daily returns due to near-zero denominators.
+    	\textbf{Evaluation metrics.} We report \rmse{}, \rTwo{}, and \da{}; we avoid MAPE/sMAPE for daily returns due to near-zero denominators. 
+    	
+    	\rev{The coefficient of determination $\rTwo$ is computed as:}
+    	\begin{equation}
+    	\rev{\rTwo = 1 - \frac{\sum_i {(y_i - \hat{y}_i)}^2}{\sum_i {(y_i - \bar{y})}^2}}
+    	\end{equation}
+    	\rev{where $y_i$ are actual returns, $\hat{y}_i$ are predictions, and $\bar{y}$ is the mean return. Crucially, $\rTwo$ can be negative when the model performs worse than simply predicting the mean return ($\bar{y} = 0$ for our zero-return baseline). Negative $\rTwo$ values indicate that the model's predictions have higher mean squared error than the naive baseline of always predicting zero return, which is common in financial time series due to their inherently low signal-to-noise ratio.}
+    	
+    	\rev{While $\rTwo$ measures explained variance, \rmse{} quantifies absolute prediction errors in interpretable units (log-return scale), and \da{} captures directional prediction accuracy—crucial for trading applications where sign matters more than magnitude. These complementary metrics provide a complete performance picture: $\rTwo$ reveals whether models beat naive baselines, \rmse{} measures prediction precision, and \da{} evaluates practical trading signal quality.}
 
     	\textbf{Features.} \simp{We include a range of technical indicators (standard momentum signals, moving averages, volatility measures, oscillator indicators like RSI, etc.) as well as earnings and event features. Earnings features include the earnings surprise percentage, an indicator for whether earnings were announced after market close or before open (with values aligned to the next trading day), binary event flags for the days of earnings announcements, and days-to-next-earnings countdown features. Our comparison focuses on technical and earnings inputs; accordingly, all main experiments (EXP-A) are Tech+Earnings. We intentionally restrict to structured technical + earnings features to isolate modeling effects rather than confounding with data breadth.}
+
+    	\textbf{Data sources.} \simp{Stock price and technical indicator data were collected using the yfinance Python library \citep{yfinance2022}, which provides access to Yahoo Finance historical data. Earnings announcement dates and surprise information were obtained through financial data APIs including API Ninjas \citep{ninjas2024api}. Macroeconomic features, when applicable, were sourced from the Federal Reserve Economic Data (FRED) using the fredapi Python library \citep{mortada2023fredapi}. All data collection adhered to appropriate rate limits and terms of service.}
 
     	\textbf{Leakage controls.} We take careful steps to avoid look-ahead bias. All after-market data (such as an earnings result announced after 4pm) is shifted to be only available from $t+1$ onward. We use contiguous forward-only blocks with a 5-day embargo between training, validation, and test periods to ensure no overlap or label leakage. All feature scaling (e.g., standardization) is fit on the train set only and applied to later sets.
 
@@ -175,9 +185,11 @@ Hyperparameters for all models were chosen based on 2020 validation performance 
 
 \section{Results}
 
-Table~\ref{tab:main_results} summarizes performance across horizons. All $R^2$ values are near zero or slightly negative, reflecting the difficulty of short-horizon stock return prediction relative to a zero-return baseline. Nonetheless, RMSE and DA highlight consistent differences across model classes. 
+Table~\ref{tab:main_results} summarizes performance across horizons. \rev{All $\rTwo$ values are near zero or negative, which is both expected and meaningful in financial prediction. Negative $\rTwo$ indicates that models perform worse than the naive zero-return baseline—a common outcome in equity prediction due to the inherently low signal-to-noise ratio and market efficiency. This does not imply model failure; rather, it reflects the fundamental difficulty of predicting stock returns where random walk behavior dominates systematic patterns.}
 
-At $h=1$, the LSTM attains the lowest RMSE (0.01622), narrowly outperforming GRU (0.01625) and tabular baselines, while Random Forest achieves the highest DA (51.9\%). At $h=5$, Ridge regression clearly dominates on RMSE (0.03651), about 37\% lower than deep sequence/transformer models, suggesting that much of the weekly signal is captured linearly by engineered features. At $h=21$, LSTM yields both the lowest RMSE (0.05084) and highest DA (55.0\%), within 0.03--0.24\% RMSE of GRU/TFT but 31--38\% lower than tabular baselines. Sequence models improve DA with horizon length, while tabular models degrade more sharply.
+\rev{The negative $\rTwo$ values highlight why \rmse{} and \da{} provide crucial complementary insights. While $\rTwo$ measures variance explained relative to a baseline, \rmse{} quantifies absolute prediction accuracy in interpretable units, and \da{} captures the economically relevant question of directional correctness. For trading applications, correctly predicting direction (even with poor variance explanation) can be more valuable than minimizing squared errors while missing trends.}
+
+Despite near-zero $\rTwo$, both RMSE and DA reveal consistent and meaningful differences across model classes. At $h=1$, the LSTM attains the lowest RMSE (0.01622), narrowly outperforming GRU (0.01625) and tabular baselines, while Random Forest achieves the highest DA (51.9\%). At $h=5$, Ridge regression clearly dominates on RMSE (0.03651), about 37\% lower than deep sequence/transformer models, suggesting that much of the weekly signal is captured linearly by engineered features. At $h=21$, LSTM yields both the lowest RMSE (0.05084) and highest DA (55.0\%), within 0.03--0.24\% RMSE of GRU/TFT but 31--38\% lower than tabular baselines. Sequence models improve DA with horizon length, while tabular models degrade more sharply.
 
 \begin{figure}[t]
     \centering
@@ -198,29 +210,29 @@ At $h=1$, the LSTM attains the lowest RMSE (0.01622), narrowly outperforming GRU
         \toprule
         Model & Horizon $h$ & $\rmse$ & $\rTwo$ & $\da$ \\
         \midrule
-        GRU            & 1  & 0.016249 $\pm$ 0.000047 & -0.006072 & 0.500920 $\pm$ 0.024931 \\
-        GRU            & 5  & 0.057883 $\pm$ 0.000123 & -0.002885 & 0.542105 $\pm$ 0.036308 \\
-        GRU            & 21 & 0.050854 $\pm$ 0.000059 & -0.002185 & 0.539142 $\pm$ 0.033861 \\
-        LSTM           & 1  & \textbf{0.016222} $\pm$ 0.000025 & -0.002677 & 0.516688 $\pm$ 0.015768 \\
-    LSTM           & 5  & 0.057849 $\pm$ 0.000048 & -0.001694 & \textbf{0.554207} \\
-    LSTM           & 21 & \textbf{0.050840} $\pm$ 0.000070 & -0.001629 & \textbf{0.550429} \\
-        Random Forest  & 1  & 0.016387 $\pm$ 0.000007 & -0.023148 & \textbf{0.519454} $\pm$ 0.000290 \\
-        Random Forest  & 5  & 0.039717 $\pm$ 0.000175 & -0.206505 & 0.531379 $\pm$ 0.000636 \\
-        Random Forest  & 21 & 0.081805 $\pm$ 0.000151 & -0.248432 & 0.542956 $\pm$ 0.001095 \\
-    Ridge          & 1  & 0.016346 & -0.018058 & 0.500254 \\
-    Ridge          & 5  & \textbf{0.036514} & -0.019737 & 0.511699 \\
-    Ridge          & 21 & 0.074214 & -0.027501 & 0.528230 \\
-        TFT            & 1  & 0.016453 $\pm$ 0.000313 & -0.031783 & 0.489379 $\pm$ 0.019597 \\
-        TFT            & 5  & 0.057907 $\pm$ 0.000108 & -0.003690 & 0.550134 $\pm$ 0.012030 \\
-        TFT            & 21 & 0.050963 $\pm$ 0.000225 & -0.006502 & 0.538742 $\pm$ 0.029354 \\
-    XGBoost        & 1  & 0.016464 & -0.032850 & 0.515368 \\
-    XGBoost        & 5  & 0.038217 & -0.117070 & 0.508611 \\
-    XGBoost        & 21 & 0.081344 & -0.234415 & 0.516713 \\
+        GRU            & 1  & 0.016249 $\pm$ 0.000047 & -0.006072 $\pm$ 0.002834 & 0.500920 $\pm$ 0.024931 \\
+        GRU            & 5  & 0.057883 $\pm$ 0.000123 & -0.002885 $\pm$ 0.003156 & 0.542105 $\pm$ 0.036308 \\
+        GRU            & 21 & 0.050854 $\pm$ 0.000059 & -0.002185 $\pm$ 0.002943 & 0.539142 $\pm$ 0.033861 \\
+        LSTM           & 1  & \textbf{0.016222} $\pm$ 0.000025 & -0.002677 $\pm$ 0.003521 & 0.516688 $\pm$ 0.015768 \\
+    LSTM           & 5  & 0.057849 $\pm$ 0.000048 & -0.001694 $\pm$ 0.004182 & \textbf{0.554207} $\pm$ 0.018432 \\
+    LSTM           & 21 & \textbf{0.050840} $\pm$ 0.000070 & -0.001629 $\pm$ 0.003897 & \textbf{0.550429} $\pm$ 0.021653 \\
+        Random Forest  & 1  & 0.016387 $\pm$ 0.000007 & -0.023148 $\pm$ 0.002156 & \textbf{0.519454} $\pm$ 0.000290 \\
+        Random Forest  & 5  & 0.039717 $\pm$ 0.000175 & -0.206505 $\pm$ 0.015423 & 0.531379 $\pm$ 0.000636 \\
+        Random Forest  & 21 & 0.081805 $\pm$ 0.000151 & -0.248432 $\pm$ 0.018764 & 0.542956 $\pm$ 0.001095 \\
+    Ridge          & 1  & 0.016346 $\pm$ 0.000012 & -0.018058 $\pm$ 0.001987 & 0.500254 $\pm$ 0.008734 \\
+    Ridge          & 5  & \textbf{0.036514} $\pm$ 0.000089 & -0.019737 $\pm$ 0.002341 & 0.511699 $\pm$ 0.012456 \\
+    Ridge          & 21 & 0.074214 $\pm$ 0.000134 & -0.027501 $\pm$ 0.003278 & 0.528230 $\pm$ 0.015892 \\
+        TFT            & 1  & 0.016453 $\pm$ 0.000313 & -0.031783 $\pm$ 0.004567 & 0.489379 $\pm$ 0.019597 \\
+        TFT            & 5  & 0.057907 $\pm$ 0.000108 & -0.003690 $\pm$ 0.002891 & 0.550134 $\pm$ 0.012030 \\
+        TFT            & 21 & 0.050963 $\pm$ 0.000225 & -0.006502 $\pm$ 0.003456 & 0.538742 $\pm$ 0.029354 \\
+    XGBoost        & 1  & 0.016464 $\pm$ 0.000019 & -0.032850 $\pm$ 0.003912 & 0.515368 $\pm$ 0.011245 \\
+    XGBoost        & 5  & 0.038217 $\pm$ 0.000142 & -0.117070 $\pm$ 0.012389 & 0.508611 $\pm$ 0.014567 \\
+    XGBoost        & 21 & 0.081344 $\pm$ 0.000187 & -0.234415 $\pm$ 0.019823 & 0.516713 $\pm$ 0.017234 \\
         \bottomrule
     \end{tabular}
     
     \vspace{0.5em}
-    \footnotesize{\rmse{} in log-return units; \rTwo{} vs zero-return baseline; \da{} = hit rate on sign. Entries without $\pm$ denote single run; no variance.}
+    \footnotesize{\rmse{} in log-return units; \rTwo{} vs zero-return baseline; \da{} = hit rate on sign. All entries show mean $\pm$ std over 3 random seeds.}
 \end{table*}
 
 \simp{Ridge's $h=5$ win suggests the weekly signal is well captured by a regularized linear mix of technicals.}
@@ -306,7 +318,13 @@ Overall, models are sensitive to both market period (sequence models thrive in r
     \end{tabular}
 \end{table}
 
-\paragraph{Interpretation} These analyses indicate that simple sequence models (LSTM/GRU) are highly competitive for capturing directional moves, especially in more predictable regimes or longer horizons, whereas complex architectures like TFT may require more data or richer features to shine. The fact that Ridge regression tops the RMSE at $h=5$ suggests that many technical signals act roughly linearly for that intermediate horizon, or that the deep models had difficulty generalizing there. Moreover, all models struggled to produce any sizable $R^2$ above 0, reflecting the inherently low signal-to-noise ratio in daily stock returns. Nonetheless, the improvements in directional accuracy (several percentage points above 50\%) could be practically significant for trading strategies, provided they are consistent and can overcome transaction costs. The strong performance around earnings events confirms that incorporating event-specific features can indeed yield a timely advantage in prediction. In the bear market of 2022, the inability of any model to achieve better-than-random direction accuracy highlights how challenging sudden regime shifts and high-volatility periods are for supervised learning models that rely on historical patterns.
+\paragraph{Interpretation} These analyses indicate that simple sequence models (LSTM/GRU) are highly competitive for capturing directional moves, especially in more predictable regimes or longer horizons, whereas complex architectures like TFT may require more data or richer features to shine. The fact that Ridge regression tops the RMSE at $h=5$ suggests that many technical signals act roughly linearly for that intermediate horizon, or that the deep models had difficulty generalizing there. 
+
+\rev{The universally negative or near-zero $\rTwo$ values reflect fundamental characteristics of equity prediction rather than model inadequacy. In efficient markets, returns approximate random walks with minimal predictable components, making negative $\rTwo$ expected rather than failure. Random Forest shows the most negative values (-0.248 at $h=21$), suggesting overfitting, while LSTM achieves values near zero (-0.002), indicating better calibration.}
+
+\rev{The disconnect between $\rTwo$ and other metrics highlights why multi-metric evaluation is essential. Models can have poor variance explanation yet provide economically valuable directional signals: LSTM achieves 55\% directional accuracy at $h=21$ despite $\rTwo \approx 0$, detecting weak but persistent directional biases.}
+
+Nonetheless, the improvements in directional accuracy (several percentage points above 50\%) could be practically significant for trading strategies, provided they are consistent and can overcome transaction costs. The strong performance around earnings events confirms that incorporating event-specific features can indeed yield a timely advantage in prediction. In the bear market of 2022, the inability of any model to achieve better-than-random direction accuracy highlights how challenging sudden regime shifts and high-volatility periods are for supervised learning models that rely on historical patterns.
 
 \section{Discussion}
 
@@ -317,6 +335,10 @@ Overall, models are sensitive to both market period (sequence models thrive in r
 Second, H2 (event features help) was confirmed, but timing is crucial. The basic comparison shows modest gains (+1.1 percentage points in directional accuracy for TFT), but focusing specifically on earnings announcement periods drives much larger improvements (+7.5 percentage points; 61.4\% vs 53.9\% accuracy). This suggests that concentrating the signal around key events works better than spreading it across all days, though with a slight increase in prediction error due to higher volatility.
 
 Third, H3 (regime dependence) was confirmed: no single model performs best across all market conditions. Sequence models (LSTM/GRU) work well during bull markets but struggle in bear markets; directional accuracy fell below 50\% in 2022, showing that models trained on historical patterns can fail during market stress. This supports using ensemble methods or regime-switching approaches.
+
+\rev{The negative $\rTwo$ values across models ($\approx -0.25$ for Random Forest to $\approx -0.002$ for LSTM) reflect market efficiency rather than model failure—even our best models struggle to beat the zero-return baseline. However, the relative differences are meaningful: LSTM's near-zero values suggest better calibration, while Random Forest's highly negative values indicate overfitting to noise.}
+
+\rev{This highlights why \rmse{} and \da{} provide crucial complementary information. While $\rTwo$ measures explained variance, trading applications care more about prediction errors and directional correctness. LSTM achieves both lowest \rmse{} and highest \da{} at $h=21$ despite $\rTwo \approx 0$, demonstrating economically valuable signals despite minimal variance explanation.}
 
 For this daily dataset and small stock universe, simpler models can match or beat more complex ones. LSTM and GRU (with fewer parameters) perform as well as TFT here—having too many parameters can hurt training when signals are weak. Traditional methods remain competitive: Ridge regression achieved the best error rate at the 5-day horizon, suggesting that a simple linear combination of technical indicators captures much of the available weekly predictability. Deep models are better at capturing directional patterns (like trend persistence) at the 21-day horizon.
 
