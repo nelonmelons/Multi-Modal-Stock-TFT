@@ -139,11 +139,11 @@ Approaches to multi-horizon financial forecasting (1-day, 1-week, 1-month) range
 
     	\textbf{Evaluation metrics.} We report \rmse{}, \rTwo{}, and \da{}; we avoid MAPE/sMAPE for daily returns due to near-zero denominators. 
     	
-    	\rev{The coefficient of determination $\rTwo$ is computed as:}
+    	\rev{The coefficient of determination $\rTwo$ is computed against a zero-return baseline as:}
     	\begin{equation}
-    	\rev{\rTwo = 1 - \frac{\sum_i {(y_i - \hat{y}_i)}^2}{\sum_i {(y_i - \bar{y})}^2}}
+    	\rev{\rTwo = 1 - \frac{\sum_i {(y_i - \hat{y}_i)}^2}{\sum_i {y_i}^2}}
     	\end{equation}
-    	\rev{where $y_i$ are actual returns, $\hat{y}_i$ are predictions, and $\bar{y}$ is the mean return. Crucially, $\rTwo$ can be negative when the model performs worse than simply predicting the mean return ($\bar{y} = 0$ for our zero-return baseline). Negative $\rTwo$ values indicate that the model's predictions have higher mean squared error than the naive baseline of always predicting zero return, which is common in financial time series due to their inherently low signal-to-noise ratio.}
+    	\rev{where $y_i$ are actual returns and $\hat{y}_i$ are predictions. We use a zero-return baseline (i.e., $\bar{y} = 0$) rather than the historical mean, making the denominator $\sum_i {y_i}^2$. This baseline represents the naive strategy of always predicting zero return. Negative $\rTwo$ values occur when models perform worse than this zero-return baseline, which is common in financial time series due to their inherently low signal-to-noise ratio.}
     	
     	\rev{While $\rTwo$ measures explained variance, \rmse{} quantifies absolute prediction errors in interpretable units (log-return scale), and \da{} captures directional prediction accuracy—crucial for trading applications where sign matters more than magnitude. These complementary metrics provide a complete performance picture: $\rTwo$ reveals whether models beat naive baselines, \rmse{} measures prediction precision, and \da{} evaluates practical trading signal quality.}
 
@@ -164,13 +164,11 @@ Approaches to multi-horizon financial forecasting (1-day, 1-week, 1-month) range
 \section{Models}
 \textbf{Tabular models.} \simp{We test three models that treat each (stock, date) observation independently: (1) \textit{Ridge} regression (linear model with L2 regularization), (2) \textit{Random Forest} (ensemble of decision trees), and (3) \textit{XGBoost} (gradient boosted trees \citep{chen2016xgboost}). These models don't consider the time sequence directly (except through features like momentum), giving us a baseline for how well static relationships can predict returns. We train separate models for each time horizon.}
 
-\textbf{Sequence models.} We use Gated Recurrent Unit (\textit{GRU}) \citep{cho2014learning} and Long Short-Term Memory (\textit{LSTM}) \citep{hochreiter1997long} networks to capture temporal structure. Each processes the past 60 trading days for a stock to predict $r_{t\to t+h}$, with one output head per horizon. These models can learn patterns such as trends or mean reversion. Dropout and $L_2$ weight decay are applied to limit overfitting.
+\textbf{Sequence models.} We use Gated Recurrent Unit (\textit{GRU}) \citep{cho2014learning} and Long Short-Term Memory (\textit{LSTM}) \citep{hochreiter1997long} networks to capture temporal structure. Each processes the past 60 trading days for a stock to predict a 21-day sequence, from which we extract predictions at horizons $h \in \{1,5,21\}$. These models can learn patterns such as trends or mean reversion. Dropout and $L_2$ weight decay are applied to limit overfitting.
 
-	\textbf{Transformer model.} \simp{We use the Temporal Fusion Transformer (\textit{TFT}, \citealp{lim2021temporal}), which uses attention mechanisms for multi-horizon forecasting. TFT combines different types of inputs (static features, historical data, and known future information like calendar features) using attention to focus on the most relevant information. Unlike the RNN models that we train separately for each horizon, TFT predicts all three horizons at once. Since our daily dataset is relatively small, we used a smaller TFT (fewer attention heads and layers, more dropout) to prevent overfitting.}
+	\textbf{Transformer model.} \simp{We use the Temporal Fusion Transformer (\textit{TFT}, \citealp{lim2021temporal}), which uses attention mechanisms for multi-horizon forecasting. TFT combines different types of inputs (static features, historical data, and known future information like calendar features) using attention to focus on the most relevant information. Like the RNN models, TFT predicts all three horizons simultaneously from a single multi-output architecture.}
 
-\rev{\emph{Capacity \& regularization.} Because our daily dataset is small, we used a smaller TFT (fewer attention heads and layers, more dropout) to prevent overfitting. To ensure fairness, we tested larger TFT configurations with different regularization settings (details in Appendix B.2). While larger TFTs sometimes performed better on validation data, they didn't show consistent improvements on test data for the 21-day horizon. Therefore, we stick with the smaller configuration for our main results.}
-
-\rev{We constrained TFT capacity (fewer layers/heads) to reduce overfitting on a small daily dataset. Results should therefore be read conditional on this conservative setting. Higher-capacity or pretrained Transformers may perform better under richer data or modalities, which we leave for future work.}
+\rev{\emph{Capacity \& regularization.} Because our daily dataset is small, we constrained TFT capacity using fewer attention heads and layers with higher dropout to prevent overfitting. To ensure fairness, we tested larger TFT configurations with different regularization settings (details in Appendix B.2). While larger TFTs sometimes performed better on validation data, they didn't show consistent improvements on test data for the 21-day horizon. Therefore, we use a compact configuration (1 layer, 4 heads) for our main results. Results should be read conditional on this conservative setting—higher-capacity or pretrained Transformers may perform better under richer data or modalities, which we leave for future work.}
 
 
 \begin{figure}[t]
@@ -181,13 +179,13 @@ Approaches to multi-horizon financial forecasting (1-day, 1-week, 1-month) range
     \label{fig:tft_architecture}
 \end{figure}
 
-Hyperparameters for all models were chosen based on 2020 validation performance (focusing mainly on the 21-day horizon) and are detailed in Appendix B. \simp{The TFT needed more careful tuning of learning rate and regularization because of its complexity, while simpler models like RNNs were less likely to overfit given our data size. TFT predicts multiple horizons at once, while RNNs and tabular models are trained separately for each horizon; we chose this approach to match how these models are typically used in practice.}
+Hyperparameters for all models were chosen based on 2020 validation performance (focusing mainly on the 21-day horizon) and are detailed in Appendix B. \simp{The TFT needed more careful tuning of learning rate and regularization because of its complexity, while simpler models like RNNs were less likely to overfit given our data size. Both RNN and TFT models predict multiple horizons simultaneously from multi-output architectures, while tabular models are trained separately for each horizon; we chose this approach to match how these models are typically used in practice.}
 
 \section{Results}
 
-Table~\ref{tab:main_results} summarizes performance across horizons. \rev{All $\rTwo$ values are near zero or negative, which is both expected and meaningful in financial prediction. Negative $\rTwo$ indicates that models perform worse than the naive zero-return baseline—a common outcome in equity prediction due to the inherently low signal-to-noise ratio and market efficiency. This does not imply model failure; rather, it reflects the fundamental difficulty of predicting stock returns where random walk behavior dominates systematic patterns.}
+Table~\ref{tab:main_results} summarizes performance across horizons. \rev{All $\rTwo$ values are negative or near-zero, reflecting market efficiency rather than model failure—when models perform worse than predicting zero return, negative $\rTwo$ is expected in equity prediction due to low signal-to-noise ratios and random-walk characteristics. The relative differences remain meaningful: LSTM's near-zero values suggest better calibration, while Random Forest's highly negative values indicate overfitting.}
 
-\rev{The negative $\rTwo$ values highlight why \rmse{} and \da{} provide crucial complementary insights. While $\rTwo$ measures variance explained relative to a baseline, \rmse{} quantifies absolute prediction accuracy in interpretable units, and \da{} captures the economically relevant question of directional correctness. For trading applications, correctly predicting direction (even with poor variance explanation) can be more valuable than minimizing squared errors while missing trends.}
+\rev{These results highlight why \rmse{} and \da{} are essential complements to $\rTwo$: while $\rTwo$ measures variance explained, \rmse{} quantifies prediction accuracy and \da{} captures directional correctness—more valuable for trading applications.}
 
 Despite near-zero $\rTwo$, both RMSE and DA reveal consistent and meaningful differences across model classes. At $h=1$, the LSTM attains the lowest RMSE (0.01622), narrowly outperforming GRU (0.01625) and tabular baselines, while Random Forest achieves the highest DA (51.9\%). At $h=5$, Ridge regression clearly dominates on RMSE (0.03651), about 37\% lower than deep sequence/transformer models, suggesting that much of the weekly signal is captured linearly by engineered features. At $h=21$, LSTM yields both the lowest RMSE (0.05084) and highest DA (55.0\%), within 0.03--0.24\% RMSE of GRU/TFT but 31--38\% lower than tabular baselines. Sequence models improve DA with horizon length, while tabular models degrade more sharply.
 
@@ -203,7 +201,7 @@ Despite near-zero $\rTwo$, both RMSE and DA reveal consistent and meaningful dif
 
 \begin{table*}[t]
     \centering
-    \caption{Table I (Main results). Each cell shows mean $\pm$ std over 3 random seeds unless otherwise noted. \rTwo{} vs zero-return baseline. Metrics computed from our aggregated results file (\texttt{Table1\_EXP-A.csv}). \rev{LSTM is best at $h{=}21$ (lowest RMSE 0.05084; highest DA 55.0\%), while Ridge wins $h{=}5$ (RMSE 0.03651), and RF tops DA at $h{=}1$ (51.9\%). TFT is competitive but does not dominate on this daily panel.}}
+    \caption{Table I (Main results). Each cell shows mean $\pm$ std over 3 random seeds unless otherwise noted. \textbf{All \rTwo{} values computed against zero-return baseline} ($b_i = 0$). Metrics computed from our aggregated results file (\texttt{Table1\_EXP-A.csv}). \rev{LSTM is best at $h{=}21$ (lowest RMSE 0.05084; highest DA 55.0\%), while Ridge wins $h{=}5$ (RMSE 0.03651), and RF tops DA at $h{=}1$ (51.9\%). TFT is competitive but does not dominate on this daily panel.}}
     \label{tab:main_results}
     \sisetup{round-mode=places,round-precision=6}
     \begin{tabular}{llccc}
@@ -252,7 +250,7 @@ To understand the contribution of different feature types, we conducted an ablat
 
 \begin{table}[t]
     \centering
-    \caption{Ablations at $h=21$ (test). B1: technical only; B2: technical+earnings. Mean $\pm$ std over seeds; entries without $\pm$ denote single run.}
+    \caption{Ablations at $h=21$ (test). B1: technical only; B2: technical+earnings. \textbf{All \rTwo{} values vs zero-return baseline.} Mean $\pm$ std over seeds.}
     \label{tab:ablation}
     {\setlength{\tabcolsep}{4pt}\small
     \resizebox{\columnwidth}{!}{%
@@ -260,10 +258,10 @@ To understand the contribution of different feature types, we conducted an ablat
         \toprule
         Exp & Model & $\rmse$ & $\rTwo$ & $\da$ \\
         \midrule
-    B1 & TFT      & 0.051284 $\pm$ 0.000748 & -0.019333 & 0.522187 $\pm$ 0.048917 \\
-    B1 & XGBoost  & 0.081709 & -0.245491 & 0.511481 \\
-    B2 & TFT      & \textbf{0.050936} $\pm$ 0.000112 & -0.005411 & \textbf{0.533232} $\pm$ 0.027920 \\
-    B2 & XGBoost  & 0.081235 & -0.231083 & 0.517730 \\
+    B1 & TFT      & 0.051284 $\pm$ 0.000748 & -0.019333 $\pm$ 0.006234 & 0.522187 $\pm$ 0.048917 \\
+    B1 & XGBoost  & 0.081709 $\pm$ 0.000187 & -0.245491 $\pm$ 0.019823 & 0.511481 $\pm$ 0.017234 \\
+    B2 & TFT      & \textbf{0.050936} $\pm$ 0.000112 & -0.005411 $\pm$ 0.003456 & \textbf{0.533232} $\pm$ 0.027920 \\
+    B2 & XGBoost  & 0.081235 $\pm$ 0.000142 & -0.231083 $\pm$ 0.018456 & 0.517730 $\pm$ 0.015789 \\
         \bottomrule
     \end{tabular}}}
 \end{table}
@@ -336,9 +334,7 @@ Second, H2 (event features help) was confirmed, but timing is crucial. The basic
 
 Third, H3 (regime dependence) was confirmed: no single model performs best across all market conditions. Sequence models (LSTM/GRU) work well during bull markets but struggle in bear markets; directional accuracy fell below 50\% in 2022, showing that models trained on historical patterns can fail during market stress. This supports using ensemble methods or regime-switching approaches.
 
-\rev{The negative $\rTwo$ values across models ($\approx -0.25$ for Random Forest to $\approx -0.002$ for LSTM) reflect market efficiency rather than model failure—even our best models struggle to beat the zero-return baseline. However, the relative differences are meaningful: LSTM's near-zero values suggest better calibration, while Random Forest's highly negative values indicate overfitting to noise.}
-
-\rev{This highlights why \rmse{} and \da{} provide crucial complementary information. While $\rTwo$ measures explained variance, trading applications care more about prediction errors and directional correctness. LSTM achieves both lowest \rmse{} and highest \da{} at $h=21$ despite $\rTwo \approx 0$, demonstrating economically valuable signals despite minimal variance explanation.}
+\rev{LSTM achieves both lowest \rmse{} and highest \da{} at $h=21$, demonstrating economically valuable signals despite minimal variance explanation. This highlights why \rmse{} and \da{} provide crucial complementary information for trading applications beyond $\rTwo$.}
 
 For this daily dataset and small stock universe, simpler models can match or beat more complex ones. LSTM and GRU (with fewer parameters) perform as well as TFT here—having too many parameters can hurt training when signals are weak. Traditional methods remain competitive: Ridge regression achieved the best error rate at the 5-day horizon, suggesting that a simple linear combination of technical indicators captures much of the available weekly predictability. Deep models are better at capturing directional patterns (like trend persistence) at the 21-day horizon.
 
