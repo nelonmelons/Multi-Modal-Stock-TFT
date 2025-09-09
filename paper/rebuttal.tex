@@ -2,6 +2,8 @@
 \usepackage[margin=1in]{geometry}
 \usepackage[hidelinks]{hyperref}
 \usepackage{enumitem}
+% Allow underlined text to wrap to the next line (unlike \underline)
+\usepackage[normalem]{ulem}
 
 \begin{document}
 
@@ -19,25 +21,25 @@ We thank the reviewers for their constructive feedback. We provide below a point
   
   \textbf{Response.} We agree and clarified scope boundaries and suggested robustness extensions without adding new experiments. We emphasize cross-universe and higher-frequency tests as future work and add practical guidance on when findings likely transfer.
   
-  \textbf{Where.} \emph{Data \& Experimental Design, ``Robustness and additional validation''} (para 4, lines ~180--220, \emph{italicized}); \underline{Discussion, ``Limitations and threats to validity''} (para 3, lines ~780--835, \underline{new}); \emph{Conclusion} (final paragraph, lines ~980--1020, \emph{clarified}); \emph{Future Work} (bullets (i)--(ii), lines ~1030--1065).
+  \textbf{Where.} \emph{Section 3 (Data \& Experimental Design), ``Robustness and additional validation'' paragraph} (\emph{italicized}); \uline{Section 5 (Discussion), ``Limitations and threats to validity'' subsection} (\uline{new}); \emph{Section 6 (Conclusion)} (\emph{clarified}).
 
   \item \textbf{Comment.} TFT capacity/fairness: reduced layers/heads may understate transformer potential; request higher-capacity, properly regularized runs.
-  
-  \textbf{Response.} We acknowledge the constrained-capacity TFT and now make the conditional interpretation explicit. We did not add new runs; instead we added \underline{capacity/regularization caveats} and clarified that stronger/pretrained transformers may fare better with richer data.
-  
-  \textbf{Where.} \underline{Models, ``Transformer model'' -- ``Capacity \& regularization''} (two \underline{new} paragraphs, lines ~520--575); Fig.~\ref{tft_architecture} caption (\underline{new} takeaway about compact config, lines ~600--615); \underline{Discussion, Limitations} (para 2, lines ~800--820).
+
+  \textbf{Response.} We acknowledge the constrained-capacity TFT and now make the conditional interpretation explicit. We did not add new runs; instead we added \uline{capacity/regularization caveats} and clarified that stronger/pretrained transformers may fare better with richer data.
+
+  \textbf{Where.} \uline{Section 4 (Models), ``Transformer model'' and ``Capacity \& regularization'' paragraphs} (\uline{new}); Figure 1 caption (\uline{new} takeaway about compact config); \uline{Section 5 (Discussion), ``Limitations and threats to validity'' subsection}.
 
   \item \textbf{Comment.} Economic significance: add trading/backtesting perspective (Sharpe, costs) beyond RMSE/DA.
   
   \textbf{Response.} We added an \underline{Economic Significance} subsection stating no new backtests were run and framing statistical results as non-economic by default; we outline cost-aware evaluation as future work.
-  
-  \textbf{Where.} \underline{Discussion, \S Economic Significance} (lines ~740--780, \underline{new}).
+
+  	\textbf{Where.} \uline{Section 5 (Discussion), Economic Significance subsection} (\uline{new}).
 
   \item \textbf{Comment.} Clarity/captions and recent references: expand key figure/table captions; include up-to-date multimodal/transformer citations.
   
   \textbf{Response.} We expanded takeaways in the captions of Table~I, Fig.~1 (DA by horizon), and Fig.~2 (regime heatmap), and added 2023--2024 references (PatchTST, TimesFM; BloombergGPT, FinGPT) with contextualized remarks.
   
-  \textbf{Where.} Table~I caption (lines ~655--690, \emph{reworded with \underline{new} takeaway}); Fig.~1 caption (lines ~640--655, \emph{reworded with \underline{new} summary}); Fig.~2 caption (lines ~900--930, \emph{reworded with \underline{new} context}); \underline{Related Work, final paragraph ``Recent transformer \& multimodal trends''} (lines ~320--365, \underline{new}).
+  \textbf{Where.} Table I caption (\emph{reworded with \uline{new} takeaway}); Figure 1 caption (\emph{reworded with \uline{new} summary}); Figure 2 caption (\emph{reworded with \uline{new} context}); \uline{Section 2 (Related Work), final paragraph on recent transformer \& multimodal trends} (\uline{new}).
 \end{itemize}
 
 \subsection*{Reviewer 2}
@@ -46,19 +48,19 @@ We thank the reviewers for their constructive feedback. We provide below a point
   
   \textbf{Response.} Added an explicit caveat that statistical accuracy does not imply profitability and listed key economic metrics and frictions; no new experiments were run.
   
-  \textbf{Where.} \underline{Discussion, \S Economic Significance} (lines ~740--780, \underline{new}).
+  \textbf{Where.} \uline{Section 5 (Discussion), Economic Significance subsection} (\uline{new}).
 
   \item \textbf{Comment.} Sensitivity to extreme/rare regimes (crashes, illiquidity) not explicitly addressed.
   
   \textbf{Response.} We added a tail-event caveat and noted that performance during extreme shocks warrants dedicated evaluation in future work.
   
-  \textbf{Where.} \underline{Discussion, ``Limitations and threats to validity''} (lines ~800--835, \underline{new}); \emph{Future Work} (lines ~1030--1065, \emph{clarified}).
+  \textbf{Where.} \uline{Section 5 (Discussion), ``Limitations and threats to validity'' subsection} (\uline{new}); \emph{Section 6 (Conclusion)} (\emph{clarified}).
 
   \item \textbf{Comment.} Generalization beyond Dow 30 should be stressed.
   
   \textbf{Response.} We strengthened the statement that results may not transfer to small-caps, international markets, or higher-frequency settings and pointed to broader universes as next steps.
   
-  \textbf{Where.} \emph{Data \& Experimental Design, ``Robustness and additional validation''} (para 4, lines ~180--220, \emph{clarified}); \underline{Discussion, Limitations} (lines ~800--835, \underline{new}).
+  \textbf{Where.} \emph{Section 3 (Data \& Experimental Design), ``Robustness and additional validation'' paragraph} (\emph{clarified}); \uline{Section 5 (Discussion), ``Limitations and threats to validity'' subsection} (\uline{new}).
 \end{itemize}
 
 \subsection*{Reviewer 3}
@@ -67,17 +69,17 @@ We thank the reviewers for their constructive feedback. We provide below a point
   
   \textbf{Response.} We clarified the intentional restriction to structured technical+earnings features to isolate modeling effects and positioned multimodal extensions as future work; we also added recent multimodal citations.
   
-  \textbf{Where.} \emph{Data \& Experimental Design, ``Features''} (para 7, lines ~240--310, \emph{clarified}); \underline{Related Work, final paragraph} (lines ~320--365, \underline{new}); \emph{Future Work} (bullet (i), lines ~1030--1065).
+  \textbf{Where.} \emph{Section 3 (Data \& Experimental Design), ``Features'' paragraph} (\emph{clarified}); \uline{Section 2 (Related Work), final paragraph} (\uline{new}); \emph{Section 6 (Conclusion)}.
 
   \item \textbf{Comment.} Compute/efficiency comparison is useful when contrasting heavy TFT vs. simpler baselines.
   
   \textbf{Response.} We added a concise compute/efficiency subsection with parameter scales and training settings to contextualize practical costs; no new timing benchmarks are claimed.
   
-  \textbf{Where.} \underline{Discussion, \S Compute \& Efficiency} (lines ~780--800, \underline{new}).
+  \textbf{Where.} \uline{Section 5 (Discussion), Compute \& Efficiency subsection} (\uline{new}).
 \end{itemize}
 
 \subsection*{Minor edits}
-Typos, consistency, and formatting refinements throughout (\emph{clarified}); expanded figure/table caption takeaways; added up-to-date references in \emph{Related Work}.
+Typos, consistency, and formatting refinements throughout (\emph{clarified}); expanded figure/table caption takeaways; added up-to-date references in Section 2 (Related Work).
 
 \bigskip
 We appreciate the reviewers’ helpful suggestions. We believe these revisions improve clarity, completeness, and the positioning of the contribution. We hope the changes satisfactorily address the minor revisions requested.
