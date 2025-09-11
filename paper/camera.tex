@@ -65,7 +65,7 @@ We study daily multi-horizon stock return prediction on the Dow 30 ($h \in \{1,5
 \end{abstract}
 
 \section{Introduction}
-Multi-horizon equity prediction remains challenging given noisy targets, regime dependence, and the potential for only small predictive signals. We present a clear, apples-to-apples comparison across model classes on the Dow 30 with realistic event sensitivity, evaluating how different modeling approaches perform under consistent data splits and feature sets.
+Multi-horizon equity prediction remains challenging given noisy targets, regime dependence, and the potential for only small predictive signals.
 
 \textbf{Contributions.}
 \begin{itemize}
@@ -122,7 +122,7 @@ Approaches to multi-horizon financial forecasting (1-day, 1-week, 1-month) range
 \section{Data \& Experimental Design}
 	\textbf{Universe and splits.} We focus on the Dow 30 universe, employing a temporal split that reserves 2020 for validation and 2021--2024 for testing. This design allows us to evaluate model performance across different market regimes.
 
-	\textbf{Why these splits and horizons.} We make predictions at each time point (not just one long-term forecast). The multi-year test period serves three purposes: (i) it covers different market conditions, allowing us to test how models perform across regimes; (ii) it provides more data points, increasing our confidence in the results; and (iii) it prevents models from overfitting to a single year. The training period includes multiple earnings cycles per stock under relatively stable market conditions, while using 2020 (COVID) as validation helps us select models that work well during volatile periods. The three horizons represent common trading timeframes, with the 21-day horizon designed to capture slower effects like earnings drift while smoothing out daily noise.
+	\textbf{Why these splits and horizons.} We make predictions at each time point (not just one long-term forecast). The multi-year test period serves three purposes: (i) it covers different market conditions, allowing us to test how models perform across regimes; (ii) it provides more data points, increasing our confidence in the results; and (iii) it prevents models from overfitting to a single year. The three horizons represent common trading timeframes, with the 21-day horizon designed to capture slower effects like earnings drift while smoothing out daily noise.
 % (Regime/event slices paragraph moved below)
 
 	\textbf{COVID-era allocation and external validity.} Isolating 2020 as validation encourages robustness without leaking into the multi-year test and mimics a realistic deployment as of Jan 2021.
@@ -170,7 +170,7 @@ Approaches to multi-horizon financial forecasting (1-day, 1-week, 1-month) range
     \label{fig:tft_architecture}
 \end{figure}
 
-Hyperparameters were selected based on 2020 validation performance. RNN and TFT models predict multiple horizons simultaneously, while tabular models are trained separately for each horizon.
+RNN and TFT models predict multiple horizons simultaneously, while tabular models are trained separately for each horizon.
 
 \section{Results}
 
@@ -221,8 +221,6 @@ Despite near-zero $\rTwo$, both RMSE and DA reveal consistent and meaningful dif
     \vspace{0.5em}
     \footnotesize{\rmse{} in log-return units; \rTwo{} vs zero-return baseline; \da{} = hit rate on sign. All entries show mean $\pm$ std over 3 random seeds.}
 \end{table*}
-
-Ridge's $h=5$ win suggests the weekly signal is well captured by a regularized linear mix of technicals.
 
 \subsection{Hypothesis Evaluation}
 
