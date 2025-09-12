@@ -1,4 +1,4 @@
-# "Benchmarking Transformers and Baselines for Multi-Horizon Stock Return Prediction with Technical and Earnings Features"
+# Benchmarking Transformers and Baselines for Multi-Horizon Stock Return Prediction with Technical and Earnings Features
 
 Acccepted to **IEEE ICITEE 2025 - JSCI** - 17th International Conference on Information Technology and Electrical Engineering - (The Joint Symposium on Computational Intelligence)
 
