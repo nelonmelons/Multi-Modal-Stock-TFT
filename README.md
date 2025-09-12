@@ -1,7 +1,6 @@
-# Multi-Modal Stock Prediction
+# "Benchmarking Transformers and Baselines for Multi-Horizon Stock Return Prediction with Technical and Earnings Features"
 
-**Paper**: "Benchmarking Transformers and Baselines for Multi-Horizon Stock Return Prediction with Technical and Earnings Features"  
-**ICITEE 2025** - 17th International Conference on Information Technology and Electrical Engineering
+Acccepted to **IEEE ICITEE 2025 - JSCI** - 17th International Conference on Information Technology and Electrical Engineering - (The Joint Symposium on Computational Intelligence)
 
 This repository contains the code for our research comparing different neural architectures (GRU, LSTM, Transformer, TFT) against classical ML baselines for stock return prediction. We focus on multi-horizon forecasting using technical indicators and earnings data.
 
