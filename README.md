@@ -1,119 +1,172 @@
-# 📈 Stock TFT: Temporal Fusion Transformer for Stock Price Prediction
+# Multi-Modal Stock Prediction
 
-## Multi-Modal Stock Model Comparison (comparison/)
+**Paper**: "Benchmarking Transformers and Baselines for Multi-Horizon Stock Return Prediction with Technical and Earnings Features"  
+**ICITEE 2025** - 17th International Conference on Information Technology and Electrical Engineering
 
-This repo’s active codebase lives in `comparison/`. It implements a leakage-safe, multi-horizon stock prediction pipeline with caching, classical baselines, and deep models.
+This repository contains the code for our research comparing different neural architectures (GRU, LSTM, Transformer, TFT) against classical ML baselines for stock return prediction. We focus on multi-horizon forecasting using technical indicators and earnings data.
 
-Checklist for this update
+## Getting Started
 
-- Summarize comparison directory and entry points
-- Document data pipeline, models, experiments, and artifacts
-- Provide Windows-friendly setup and run steps
+The main code is in `comparison/`. Two key entry points:
 
-### Overview
+- `run_all_models.py` - runs the full experimental pipeline
+- `main.py` - just builds the data module for testing
 
-- Entry points:
-  - `comparison/run_all_models.py`: end-to-end experiments (data → train → eval → artifacts)
-  - `comparison/main.py`: builds the leakage-free data module only
-- Core modules:
-  - `comparison/models.py`: LSTM, GRU, Transformer, TFT implementations
-  - `comparison/train.py`: training loops for generic and TFT models
-  - `comparison/evaluation.py`: multi-horizon metrics (RMSE, MAE, R2, DA) and detailed outputs
-  - `comparison/cache_manager.py`: unified cache for stock, news, FRED, TA, events, and features
-  - `comparison/dataModule/`: data loaders, feature building, symbol universe, etc. (imported in code)
+Key files:
 
-### Data pipeline (leakage-safe)
+- `models.py` - all the neural network implementations
+- `train.py` - training loops
+- `evaluation.py` - metrics and analysis
+- `cache_manager.py` - handles data caching
 
-- Fixed windows: Train 2016-01-01→2019-12-31, Val 2020-01-01→2020-12-31, Test 2021-01-01→2024-12-31
-- Horizons evaluated: [1, 5, 21]; lookback (encoder_len) = 60; predict_len = 21
-- Universe: `src.universe.DOW30_2018` (imported)
-- Sources and features (via `comparison/main.py`):
-  - Prices (yfinance), corporate events, news embeddings, FRED, technicals
-  - Features built with strict temporal splits; no future peeking
-- Caching: `comparison/cache/` auto-populates with `.pkl` and `.json` + metadata
+## Data Setup
 
-### Models
+We use a clean train/validation/test split to avoid look-ahead bias:
 
-- Baselines (from `src.sk_baselines`): Ridge, RandomForest, XGBoost (tuned on 2020 Val for RMSE@21)
-- Deep models (`comparison/models.py`): GRUModel, LSTMModel, TransformerModel, TFT
-- Device selection via `model.tft_model.setup_device()`
+- Training: 2016-2019
+- Validation: 2020
+- Testing: 2021-2024
 
-### Experiments and artifacts
+The dataset includes DOW 30 stocks with:
 
-- Orchestrated in `comparison/run_all_models.py` across seeds [42, 43, 44]
-- Experiment sets:
-  - EXP-A1/A2/A3: Main comparisons across horizons [1,5,21] with models: Ridge, XGBoost, RandomForest, GRU, LSTM, TFT
-  - EXP-B1/B2/B3: Ablations by modality (Tech, Tech+Earnings, Tech+Earnings+News) for XGBoost/TFT @21
-- Outputs under `comparison/artifacts/`:
-  - `predictions/EXP-<ID>_<Model>_<Seed>.parquet` (columns: date, ticker, horizon, y_true, y_pred)
-  - `metrics/*.csv` (per-experiment metrics and Table 1/2 aggregations)
-  - `figures/*.png` (DA-by-horizon bar, regime heatmap, equity curve, table images)
-  - `slices/*.csv` (regime and earnings-window slices for EXP-A3)
-  - `experiment_log.json` (universe, contract, package versions, params)
+- Price data from Yahoo Finance
+- Technical indicators (RSI, MACD, etc.)
+- Earnings announcements
+- News sentiment embeddings
+- FRED economic indicators
 
-### Setup (Windows PowerShell)
+Prediction horizons: 1, 5, and 21 days ahead.
 
-1. Create and activate a venv
+## Models
+
+**Baselines**: Ridge regression, Random Forest, XGBoost  
+**Neural networks**: GRU, LSTM, Transformer, Temporal Fusion Transformer
+
+All models are tuned on the validation set and evaluated on unseen test data.
+
+## Experiments
+
+We run two main experiment sets:
+
+**EXP-A**: Compare all models across different prediction horizons  
+**EXP-B**: Ablation study on input features (technical only vs. technical + earnings vs. all features)
+
+Results are saved to `comparison/artifacts/` with:
+
+- Prediction files (`.parquet`)
+- Metrics summaries (`.csv`)
+- Visualizations (`.png`)
+- Detailed analysis by market regime
+
+## Setup
+
+1. Clone and navigate to comparison folder:
+
+```bash
+cd comparison
+```
+
+2. Create virtual environment:
 
 ```powershell
-cd comparison
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-2. Install dependencies
+3. Install requirements:
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-3. Configure API keys (either `.env` in `comparison/` or session env vars)
+4. Set up API keys in `.env` file:
 
-```powershell
-# .env is supported by run_all_models.py
-# For session-only vars:
-$env:NEWS_API_KEY = "<key>"
-$env:FRED_API_KEY = "<key>"
-$env:API_NINJAS_KEY = "<key>"
+```
+NEWS_API_KEY=your_key_here
+FRED_API_KEY=your_key_here
+API_NINJAS_KEY=your_key_here
 ```
 
-Notes
+## Running Experiments
 
-- `TA-Lib` and related packages may require platform-specific wheels on Windows.
-- Data is cached in `comparison/cache/`; delete files there to refresh.
+The pipeline supports extensive CLI customization. Get help with:
 
-### Run
+```powershell
+python run_all_models.py --help
+```
 
-- Full experiment suite (creates predictions/metrics/slices/figures under `comparison/artifacts/`):
+### Basic Usage
+
+Run with defaults (DOW 30, 2016-2024 data, all models):
 
 ```powershell
 python run_all_models.py
 ```
 
-- Data-only smoke test (builds features and loaders, uses cache):
+Test data loading only:
 
 ```powershell
 python main.py
 ```
 
-### Repository layout (focused on comparison/)
+### Customizing Date Ranges
 
-```
-comparison/
-    run_all_models.py     # orchestrates experiments and artifact generation
-    main.py               # builds leakage-free data module and features
-    models.py             # GRU, LSTM, Transformer, TFT
-    train.py              # training loops for deep models
-    evaluation.py         # metrics and detailed predictions
-    cache_manager.py      # unified caching layer
-    requirements.txt      # Python dependencies for comparison pipeline
-    artifacts/            # outputs: metrics, predictions, figures, slices, log
-    cache/                # cached raw and derived data (.pkl/.json + meta)
-    dataModule/           # loaders, feature building, adapters (imports used)
-    src/                  # universe and baseline helpers (imports used)
+```powershell
+# Custom training/test periods
+python run_all_models.py --train-start 2018-01-01 --train-end 2021-12-31 --test-start 2022-01-01 --test-end 2024-12-31
 ```
 
-### Minimal customization
+### Customizing Stock Universe
 
-- Edit experiment lists, seeds, and horizons in `comparison/run_all_models.py`
-- Adjust lookback/predict_len and batch size in the base config block
+```powershell
+# Tech stocks only
+python run_all_models.py --universe AAPL,MSFT,GOOGL,TSLA,NVDA
+
+# From file (one symbol per line)
+python run_all_models.py --universe-file my_stocks.txt
+
+# Use preset universe
+python run_all_models.py --universe-preset SP500
+```
+
+### Customizing Models and Experiments
+
+```powershell
+# Run specific models only
+python run_all_models.py --models XGBoost,TFT,LSTM
+
+# Run only main comparison experiments (not ablations)
+python run_all_models.py --experiments A
+
+# Custom prediction horizons and seeds
+python run_all_models.py --horizons 1,5,10,21 --seeds 42,43,44,45,46
+```
+
+### Model Configuration
+
+```powershell
+# Adjust model parameters
+python run_all_models.py --lookback 120 --predict-len 30
+
+# Custom output directory
+python run_all_models.py --output-dir my_results
+```
+
+### Available CLI Options
+
+- **Date ranges**: `--train-start`, `--train-end`, `--val-start`, `--val-end`, `--test-start`, `--test-end`
+- **Stock universe**: `--universe`, `--universe-file`, `--universe-preset` (DOW30/SP500/NASDAQ100)
+- **Model selection**: `--models` (Ridge,XGBoost,RandomForest,GRU,LSTM,TFT)
+- **Experiments**: `--experiments` (A=main comparison, B=ablations, ALL=both)
+- **Prediction setup**: `--horizons`, `--seeds`, `--lookback`, `--predict-len`
+- **Output**: `--output-dir`
+
+## Results
+
+The code generates all tables and figures from our paper. Key metrics include RMSE, R², and directional accuracy across different market conditions and prediction horizons.
+
+## Notes
+
+- First run will take time to download and cache data
+- TA-Lib may need special installation on Windows
+- All data is cached in `comparison/cache/` for faster subsequent runs
