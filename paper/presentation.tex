@@ -107,6 +107,41 @@
   \end{block}
 \end{frame}
 
+\begin{frame}{Literature \& Research Gaps}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \textbf{Existing Approaches}
+      \begin{itemize}\small
+        \item \textbf{Classical:} ARIMA, VAR—assume linearity/stationarity
+        \item \textbf{Tree ensembles:} XGBoost, Random Forest—strong on cross-sections
+        \item \textbf{RNNs:} LSTM/GRU capture temporal patterns
+        \item \textbf{Transformers:} TFT, PatchTST—excel with scale \& multimodal data
+        \item \textbf{Recent:} TimesFM (zero-shot), BloombergGPT (text+price)
+      \end{itemize}
+    \end{column}
+    
+    \begin{column}{0.48\textwidth}
+      \textbf{Key Gaps}
+      \begin{itemize}\small
+        \item Few apples-to-apples comparisons across model classes
+        \item Earnings/event features underused in deep models
+        \item Look-ahead bias risks in evaluation
+        \item Limited regime analysis
+      \end{itemize}
+      
+      \vspace{0.3cm}
+      
+      \textbf{Our Contribution}
+      \begin{itemize}\small
+        \item Fair comparison: identical features
+        \item Earnings + technical inputs
+        \item Strict temporal validation
+        \item Regime \& event breakdown
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
 % ============================================
 % SECTION 2: METHODOLOGY
 % ============================================

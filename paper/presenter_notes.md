@@ -1,100 +1,99 @@
 # Presenter Notes: Multi-Horizon Stock Prediction
 
-**Conference Presentation (~20 minutes)**
+**IEEE ICITEE 2025 Conference Presentation (~20 minutes)**
 
 ---
 
-## Pre-Presentation Checklist
+## Pre-Talk Setup
 
-- [ ] Test laptop connection to projector
-- [ ] Check font sizes are readable from back of room
-- [ ] Have backup USB with PDF
-- [ ] Water/coffee ready
-- [ ] Timer set for 18 minutes (leave 2 min buffer)
-
----
-
-## SLIDE 1: Title Slide (30 sec)
-
-**What to say:**
-"Good morning/afternoon everyone. My name is Nelson Siu from the University of Toronto, and I'm here with Dr. Jonathan Chan from KMUTT in Thailand. Today we're presenting our work on benchmarking transformers and baseline models for multi-horizon stock return prediction."
-
-**Key point:** Establish credibility, set the stage
+- Test projector connection and backup slides on USB
+- Have water ready
+- Timer set to 18 minutes (2 min buffer for Q&A)
+- Take a breath—you've got this!
 
 ---
 
-## SLIDE 2: Outline (15 sec)
+## SLIDE 1: Title (30 seconds)
 
-**What to say:**
-"We'll cover our motivation, hypotheses, methodology, results, and what this means for both practitioners and researchers in the field."
+Good morning everyone. I'm Nelson Siu from the University of Toronto, and I'm here today with my collaborator Dr. Jonathan Chan from King Mongkut's University of Technology Thonburi in Thailand.
 
-**Action:** Quickly scan through - don't linger
-
----
-
-## SLIDE 3: The Challenge (1 min)
-
-**What to say:**
-"Stock prediction is notoriously difficult. We have extremely noisy data with low signal-to-noise ratios. Patterns change across different market regimes - what works in a bull market may fail in a bear market. And markets are efficient, limiting predictability.
-
-But this matters enormously for trading strategies, risk management, and understanding market dynamics.
-
-Our key question is: Do complex transformer models actually outperform simpler baselines on daily stock data? To answer this, we benchmark across multiple time horizons, model classes, and market conditions."
-
-**Emphasis:** Pause after "key question" - this is the hook
+We're going to talk about something that's been a bit of a hot topic in quantitative finance lately—whether these fancy transformer models that have been dominating natural language processing actually help us predict stock returns better than simpler approaches.
 
 ---
 
-## SLIDE 4: Research Gap (1 min)
+## SLIDE 2: The Challenge & Our Approach (2 minutes)
 
-**What to say:**
-"Looking at the literature, we found four major gaps.
+So the question we wanted to answer is whether transformers actually beat simpler models on daily stock data.
 
-First, most studies don't do fair comparisons - they test transformers, RNNs, and tabular models on different features or datasets.
+This is hard because stock returns are brutally noisy, and what works in a bull market can completely fail in a bear market. Plus you've got market efficiency working against you the whole time.
 
-Second, event features like earnings announcements are rarely integrated into deep learning models, despite known predictive power.
+But this matters a lot for trading, risk management, portfolio optimization—we really need to know what actually works in practice.
 
-Third, many protocols risk look-ahead bias - accidentally using future information.
+So our approach was to do a fair comparison where every model gets the exact same features. We use strict temporal validation, test at three horizons—next day, one week, and one month—and we break down the results by market regime and look specifically at earnings events.
 
-And fourth, there's limited evaluation across different market conditions.
-
-Our contribution is an apples-to-apples comparison with strict temporal validation, a fixed universe to avoid survivorship bias, and comprehensive regime and event analysis."
-
-**Emphasis:** "apples-to-apples" and "strict temporal validation"
+We're using the Dow 30 from 2016 to 2024, which gives us a bunch of different market conditions to test against.
 
 ---
 
-## SLIDE 5: Our Contributions (1.5 min)
+## SLIDE 3: Three Core Hypotheses (2 minutes)
 
-**What to say:**
-"Let me highlight our four main contributions.
+Instead of just throwing models at data, we set up three specific hypotheses to test.
 
-First, robust experimental design. We use a strict temporal split - training from 2016 to 2019, holding out 2020 as validation, and testing on 2021 to 2024. This covers multiple market regimes. We fixed the Dow 30 constituents to avoid survivorship bias, and used forward-only validation with 5-day embargos to prevent leakage.
+First hypothesis is that TFT beats the baselines at 21 days because attention mechanisms should handle long-term dependencies better. We set a clear bar—we need at least 2 percentage points better directional accuracy or 5% lower error to call it a win.
 
-Second, fair model comparison. Every model sees identical features. We test RNNs, transformers, and tabular models, running each three times with different random seeds for reliability.
+Second hypothesis is that adding earnings features improves directional accuracy without making the errors worse. This is based on the fact that markets don't immediately price in earnings—there's this documented drift that happens after announcements.
 
-Third, comprehensive evaluation using multiple metrics - RMSE, R-squared, and directional accuracy - across all horizons, with specific analysis of bear versus bull markets and earnings windows.
+Third hypothesis is that model rankings shift across different market conditions. So what works in calm markets might completely fail when things get volatile, and we'd expect to see different winners in the 2022 bear market versus the 2023-24 rally.
 
-And fourth, we found some surprising insights that challenge common assumptions about complex models."
-
-**Action:** Gesture to each point as you mention it
+The nice thing is we've got concrete criteria we can actually test against.
 
 ---
 
-## SLIDE 6: Three Core Hypotheses (1.5 min)
+## SLIDE 4: Literature & Research Gaps (90 seconds)
 
-**What to say:**
-"We tested three specific hypotheses.
+Let me give you quick background on what's been tried in this space.
 
-H1: Model class advantage. We hypothesized that the Temporal Fusion Transformer would outperform baselines at the 21-day horizon, based on the assumption that attention mechanisms handle long-term dependencies better. We set clear criteria: at least 2 percentage points improvement in directional accuracy or 5% reduction in RMSE.
+Classical methods like ARIMA and VAR assume linearity, and they work okay for short horizons but really struggle when you hit regime shifts. Tree ensembles like XGBoost and Random Forest are strong on cross-sectional tasks, and RNNs like LSTM and GRU are good at capturing temporal patterns and often beat the classical approaches.
 
-H2: Event features add value. We predicted that adding earnings features would improve directional accuracy without worsening error, based on well-documented post-earnings-announcement drift.
+More recently we've seen transformers come in. TFT uses attention for multi-horizon forecasting, PatchTST improves long-horizon prediction, and there's foundation models like TimesFM that do zero-shot forecasting. BloombergGPT even integrates text and prices together. These all work well when you have scale and multimodal data.
 
-H3: Regime dependence. Following the Adaptive Markets Hypothesis, we expected model rankings to differ between bear and bull markets - what works in calm conditions may fail in volatility.
+But there are some real gaps in the literature. Very few studies actually compare all these models with the same features, earnings features are pretty underused in deep learning models, and evaluation protocols sometimes have look-ahead bias or they're missing regime analysis entirely.
 
-These hypotheses give us concrete, testable predictions rather than just reporting results."
+So that's what we're addressing here—doing a fair comparison where identical features go to all models, combining earnings with technical inputs, using strict temporal validation, and breaking things down by regime.
 
-**Pause:** After each hypothesis, give audience time to absorb
+---
+
+## SLIDE 5: Experimental Design (90 seconds)
+
+So we're using the Dow 30 stocks, and we fixed the composition as of 2018 to avoid survivorship bias.
+
+The timeline works like this: we train on 2016 to 2019, then we hold out 2020 for validation—that COVID year actually helps us tune hyperparameters without leaking into the test set. Then we test on 2021 to 2024, which gives us four years of test data spanning really different market regimes.
+
+We're predicting at three horizons: 1, 5, and 21 days, so that's next day, one week, and one month out. We use log returns because they behave better statistically.
+
+The key thing is we make predictions at every single time point, so this multi-year test period lets us see how the models actually perform across different conditions and it prevents them from just overfitting to one particular year.
+
+---
+
+## SLIDE 6: Data & Features (90 seconds)
+
+We've got two main feature groups here. Technical indicators include your standard momentum, moving averages, volatility measures, RSI, and MACD. Then earnings features include surprise percentage, days until or since the announcement, and event flags for that plus or minus 3 day window around earnings.
+
+Data comes from yfinance for prices, API Ninjas for earnings data, and FRED for the macro variables.
+
+Now the really critical part is leakage control, and this is where a lot of studies actually get it wrong. We shift any after-market data to the next day, we use forward-only validation with 5-day embargos between splits, and the scaling parameters get fit only on training data—absolutely no peeking at the future.
+
+The models train on pooled data from all 30 stocks, so we're learning shared parameters across both time and stocks.
+
+---
+
+## SLIDE 7: Models Tested (2 minutes)
+
+On the tabular side we've got Ridge regression as our linear baseline, Random Forest with 100 trees and depth capped at 5, and XGBoost with shallow trees. These models train separately for each horizon.
+
+For sequence models we're using LSTM and GRU, both with 64 hidden units and a 60-day lookback window. Then there's TFT—the Temporal Fusion Transformer. We kept it pretty compact with 4 attention heads, 1 layer, and about 50,000 parameters total. We didn't go crazy with the capacity because we knew we were working with limited data. The sequence models predict all three horizons at once, which is actually nice because they can share representations across the different time scales.
+
+We're evaluating with three metrics. RMSE measures the prediction error, R-squared is computed against a zero-return baseline—I want to flag this because all our R-squared values are going to be negative or near zero, and that's completely normal in finance. It reflects market efficiency, not model failure. Then directional accuracy is just the fraction of times we get the sign right, and this actually matters most for trading. Fifty percent would be random coin-flipping, anything above 50% means you've got real signal.
 
 ---
 
@@ -167,328 +166,169 @@ This gives us a nice range from simple to complex, tabular to sequential."
 
 ---
 
-## SLIDE 12: TFT Architecture (30 sec)
+## SLIDE 8: Main Results (2.5 minutes)
 
-**What to say:**
-"Here's the TFT architecture in more detail. Static encoders handle stock metadata, historical encoders process past prices and technical indicators, future encoders handle known covariates. Multi-head attention learns temporal dependencies, and separate heads predict each horizon simultaneously.
+Alright, so the results are honestly pretty surprising.
 
-We kept the configuration compact to prevent overfitting on this daily panel."
+At the one-day horizon, LSTM gets the lowest RMSE at 0.01622, just barely ahead of GRU. Random Forest actually has the highest directional accuracy at 51.9%. And TFT is the worst performer here with only 48.9% directional accuracy.
 
-**Action:** Trace the flow with laser pointer if available
+At five days things get really interesting. Ridge completely dominates on RMSE at 0.03651, which is about 37% lower than the deep models. What this tells us is that the weekly signal is actually being captured by linear combinations of our engineered features—you don't need deep learning for this. But LSTM still has the best directional accuracy at 55.4%.
 
----
+Now at twenty-one days, which is our primary horizon, LSTM wins on both metrics. It gets 0.05084 RMSE and 55% directional accuracy, beating Ridge by 31 to 38 percent on the error. TFT is competitive here—0.05096 RMSE and 53.9% accuracy—but it doesn't actually lead.
 
-## SLIDE 13: Evaluation Metrics (1 min)
-
-**What to say:**
-"We use three complementary metrics.
-
-RMSE measures prediction precision in log-return units - interpretable and common.
-
-R-squared is computed against a zero-return baseline, representing the naive strategy of always predicting zero. Negative values are common in finance due to low signal-to-noise and actually reflect market efficiency rather than model failure.
-
-Directional accuracy is the fraction of correct sign predictions. This is most important for trading - getting the direction right matters more than the exact magnitude. 50% is random; anything above 50% shows predictive power."
-
-**Emphasis:** "Directional accuracy is most important for trading"
+So the big takeaway is LSTM wins at both short and long horizons, Ridge dominates at the medium horizon, and TFT is competitive throughout but never actually superior.
 
 ---
 
-## SLIDE 14: Main Results (2 min)
+## SLIDE 9: Key Observations (90 seconds)
 
-**What to say:**
-"Here are our main results across all three horizons.
+So this plot really tells the story here. You can see the sequence models—LSTM and GRU—improving from around 51-52% at day 1 all the way up to 55% at the longer horizons. There's a clear upward trend there.
 
-At h=1, next day, LSTM achieves the lowest RMSE at 0.01622, just barely ahead of GRU. Random Forest has the highest directional accuracy at 51.9%. TFT is actually worst here at 48.9% DA.
+The tabular models, on the other hand, they stay pretty flat or even degrade a bit. Ridge, Random Forest, XGBoost—they're not getting any better as the horizon extends.
 
-At h=5, one week, Ridge regression dominates on RMSE at 0.03651 - about 37% lower than the deep models. This suggests weekly signals are largely linear. But LSTM has the best directional accuracy at 55.4%.
+TFT stays competitive throughout but it never actually takes the lead at any horizon.
 
-At h=21, one month - our primary horizon - LSTM wins both metrics: lowest RMSE at 0.05084 and highest DA at 55.0%. It's 31 to 38% better than tabular baselines on RMSE. TFT is competitive at 0.05096 RMSE and 53.9% DA, but it doesn't lead.
+What this suggests is that temporal models are benefiting from that longer context when you're trying to predict multi-week moves. They're actually learning something about the dynamics. Tabular models are mostly capturing instantaneous relationships in the feature space, not these horizon-dependent patterns.
 
-The key takeaway: LSTM wins at short and long horizons, Ridge dominates at medium, and TFT is competitive but not superior."
-
-**Action:** Point to bold numbers as you mention them
+And yes, all the R-squared values are negative or near zero, but that's completely normal in finance—returns are just incredibly noisy. LSTM being near zero actually means better calibration. Random Forest at -0.248 is clearly overfitting.
 
 ---
 
-## SLIDE 15: Directional Accuracy Across Horizons (45 sec)
+## SLIDE 10: Hypothesis Testing (2 minutes)
 
-**What to say:**
-"This plot shows a clear pattern. Sequence models - LSTM and GRU in dark blue and orange - improve from about 51-52% at h=1 to about 55% at longer horizons.
+Let's talk about the hypotheses.
 
-Tabular baselines stay relatively flat or even degrade slightly.
+Hypothesis 1 was about TFT superiority, and it's not supported. At 21 days, LSTM gets 55% directional accuracy while TFT only gets 53.9%, and LSTM also has slightly lower RMSE. This doesn't meet our threshold for saying TFT is better. What we're seeing is that attention mechanisms aren't providing any advantage on this daily stock panel, and LSTM's simpler structure is actually better suited to these noisy returns.
 
-This suggests temporal sequence models benefit more from longer context when predicting multi-week moves, whereas tabular models capture less horizon-dependent signal."
-
-**Emphasis:** "improve" and "stay flat" - the divergence is key
+Hypothesis 3 about regime dependence is supported. In the 2022 bear market, GRU performs best on RMSE, but here's the kicker—all the models fall below 50% directional accuracy during that period. They're basically coin flips. But in the 2023-24 rally, LSTM completely dominates with 56.2% directional accuracy. So the rankings completely change across regimes, and what we're seeing is that sequence models thrive when there are clear trends but they fail in high volatility environments.
 
 ---
 
-## SLIDE 16: Why Are All R² Values Negative? (1 min)
+## SLIDE 11: Earnings Features (2 minutes)
 
-**What to say:**
-"You might be wondering why all our R-squared values are negative or near zero. This is actually normal in finance!
+Hypothesis 2 is where things get really interesting.
 
-R-squared measures performance versus a zero-return baseline - the naive strategy of always predicting zero return. Negative R-squared means the model performs worse than this naive strategy.
+We ran an ablation study comparing technical features only versus technical plus earnings. At the 21-day horizon, adding earnings features gives us about a 1.1 percentage point improvement, which is modest but consistent across the board.
 
-This reflects market efficiency and extremely low signal-to-noise ratios, not model failure.
+But look at what happens during those earnings windows—the plus or minus 3 days around announcements. Directional accuracy jumps all the way up to 61.4% compared to 53.9% outside those windows. That's 7.5 percentage points, which is huge.
 
-Look at the differences: LSTM's near-zero values around -0.002 suggest better calibration and that it's finding real signal. Random Forest's highly negative values at -0.248 indicate severe overfitting.
+Now RMSE does increase a bit during earnings windows because volatility is naturally higher around those events. But the directional signal is so much stronger that it more than makes up for it. This really confirms the post-earnings drift phenomenon—markets genuinely don't immediately price in earnings information.
 
-Despite negative R-squared, RMSE and directional accuracy reveal meaningful, consistent differences. DA above 50% can be economically significant even when R-squared is negative."
-
-**Emphasis:** "This is normal" and "economically significant"
+So Hypothesis 2 is supported. Earnings features give you modest overall gains, but you get substantial improvements during the announcement windows themselves. If you're trading around earnings, these features really matter.
 
 ---
 
-## SLIDE 17: Hypothesis 1 - TFT Superiority? (1 min)
+## SLIDE 12: Why Simple Models Win (2 minutes)
 
-**What to say:**
-"Let's evaluate hypothesis 1. We predicted TFT would outperform baselines at the 21-day horizon.
+So why did simpler models match or even beat TFT? There are four main reasons.
 
-Results: LSTM achieves RMSE 0.05084 and DA 55.0%. TFT gets 0.05096 and 53.9%.
+First is data constraints. We're working with 30 stocks at daily frequency, which is pretty small for deep learning. TFT has 50,000 parameters, and that might just be too many for this amount of data. You really need a lot of data to properly train those attention mechanisms.
 
-The verdict is clear: H1 is NOT supported. LSTM beats TFT by 0.24% on RMSE and 1.1 percentage points on directional accuracy. These differences don't meet our thresholds of 2 percentage points or 5% improvement.
+Second is signal characteristics. There's extremely low signal-to-noise ratio in stock returns, and it looks like the short-term patterns are actually quasi-linear, which explains why Ridge completely dominates at the 5-day horizon. You just don't need complex nonlinear models for that.
 
-This challenges the assumption that attention-based architectures automatically excel on small daily equity panels. The additional complexity of attention doesn't help here."
+Third is model capacity trade-offs. More parameters means harder training when your signals are this weak. LSTM and GRU have about 25,000 parameters compared to TFT's 50,000, and they're achieving a better bias-variance trade-off on this particular dataset.
 
-**Emphasis:** "NOT supported" and "challenges the assumption"
+Fourth is feature engineering. Our technical indicators are already capturing most of the signal, and tabular models can exploit these really effectively. The deep models aren't adding much on top of that good feature engineering.
 
----
-
-## SLIDE 18: Hypothesis 2 - Earnings Features Matter? (1.5 min)
-
-**What to say:**
-"Hypothesis 2 is more interesting. We predicted earnings features would improve directional accuracy without worsening error.
-
-The ablation study on the left shows that for TFT, adding earnings features improves DA from 52.2% to 53.3% - a 1.1 percentage point gain - while slightly reducing RMSE. XGBoost shows similar patterns.
-
-But look at the earnings window analysis on the right. This is striking: during the ±3 day window around earnings announcements, directional accuracy jumps to 61.4% compared to 53.9% outside these windows. That's a 7.5 percentage point improvement!
-
-Yes, RMSE increases slightly due to higher volatility around earnings, but the directional signal is much stronger.
-
-The verdict: H2 is SUPPORTED. Earnings features provide modest overall gains but substantial improvements during announcement windows, confirming post-earnings-announcement drift."
-
-**Emphasis:** "61.4%" and "7.5 percentage point improvement"
+So when do transformers actually help? They need scale—we're talking 100 billion time points like TimesFM has. They need multimodal inputs like text combined with prices. And they benefit a lot from pretraining and transfer learning. We just don't have any of that here.
 
 ---
 
-## SLIDE 19: Hypothesis 3 - Regime Dependence (1.5 min)
+## SLIDE 13: Key Takeaways & Future Work (2 minutes)
 
-**What to say:**
-"Hypothesis 3 predicted model rankings would differ across market regimes.
+Let me wrap up with the main findings.
 
-This heatmap shows RMSE by model in two distinct periods. Darker means better - lower error.
+First, simple models are genuinely competitive here. LSTM and Ridge can match transformers on this daily stock data, so you don't need to overcomplicate things.
 
-In the 2022 bear market on the left, GRU achieves the lowest RMSE at 0.0636. But look at directional accuracy - all models fall below 50%. They're essentially coin flips in the bear market.
+Second, earnings features are really valuable, especially during those announcement windows where we saw that 7.5 percentage point boost in directional accuracy.
 
-In the 2023-24 rally on the right, LSTM dominates with RMSE 0.0475. Both LSTM and GRU achieve 56.2% directional accuracy - significantly better than in the bear market.
+Third, performance is highly regime-dependent. What works great in a bull market can completely fail in a bear market, so you need to actively monitor this.
 
-The verdict: H3 is SUPPORTED. Model rankings change dramatically across regimes. Sequence models thrive in bull markets with clear trends but fail to sustain accuracy in high-volatility downturns. This aligns perfectly with the Adaptive Markets Hypothesis."
+Fourth, transformers aren't magic—they need scale to work well. They shine when you have massive amounts of data and rich, heterogeneous inputs.
 
-**Action:** Point to darkest cells in each heatmap
+For future work, the obvious next step is multimodal integration where you're combining text from news and earnings calls with the price data. That's really where transformers might pull ahead. We could also scale this up to the S&P 500, test on intraday data, explore newer architectures like PatchTST. And critically, we need economic evaluation—actual trading simulations with transaction costs, not just statistical metrics.
 
----
-
-## SLIDE 20: Why Did Simple Models Win? (1 min)
-
-**What to say:**
-"So why did simpler models match or beat the complex transformer?
-
-Four reasons. First, data constraints: 30 stocks at daily frequency is relatively small for deep learning. TFT's 50,000 parameters may be too many.
-
-Second, signal characteristics: extremely low signal-to-noise ratio. Short-term patterns appear to be quasi-linear, which explains why Ridge dominates at h=5.
-
-Third, model capacity trade-offs: more parameters means harder to train with weak signals. LSTM and GRU have about 25,000 parameters versus TFT's 50,000. Simpler models achieve better bias-variance trade-off.
-
-Fourth, feature engineering matters: our strong technical indicators capture most of the signal, and tabular models exploit these effectively. Deep models don't add much on top."
-
-**Key phrase:** "better bias-variance trade-off"
+Bottom line is start simple, engineer your features carefully, and validate rigorously. Transformers excel when you have scale and multimodal data, but not on small daily panels like this.
 
 ---
 
-## SLIDE 21: When Do Transformers Shine? (1 min)
+## SLIDE 14: Q&A
 
-**What to say:**
-"Our negative result suggests transformers need more to succeed.
+Thank you very much. I'm happy to answer any questions.
 
-They need larger datasets - TimesFM was trained on 100 billion time points; we have about 30 stocks times 8 years.
-
-They need richer modalities: text from news and earnings calls, social media, alternative data like satellite imagery. BloombergGPT and FinGPT show the power of multimodal integration.
-
-They may benefit from longer horizons or higher frequency data - intraday gives more samples, longer-term forecasting may have clearer patterns.
-
-And they need pretraining - transfer learning from related tasks or foundation models for finance.
-
-The key insight: transformers aren't universally better. They shine when you have scale and richness."
-
-**Emphasis:** "scale and richness"
+[Wait for questions. Don't rush to fill silence. Make eye contact. Smile.]
 
 ---
 
-## SLIDE 22: Practical Recommendations (1 min)
+---
 
-**What to say:**
-"What should practitioners do?
+# BACKUP: Anticipated Questions & Natural Responses
 
-For model selection by horizon: use LSTM or simple tabular methods for daily predictions, Ridge regression for weekly - linear is sufficient - and LSTM or GRU for monthly predictions to capture temporal patterns.
+## Q: Why didn't you test on more stocks?
 
-Only use transformers if you have large diverse datasets, multimodal inputs, computational resources for training, and the ability to leverage pretraining.
-
-And don't neglect feature engineering! Strong technical indicators and earnings features capture most of the signal. Traditional feature engineering still matters enormously."
-
-**Action:** This is actionable advice - slow down slightly
+Good question. We used Dow 30 for a fixed universe—no survivorship bias. S&P 500 is valuable future work, but we wanted rigorous controls first. Dow 30 gives us 30 stocks times 2000 days, about 60,000 observations. Substantial for initial study.
 
 ---
 
-## SLIDE 23: Economic Significance vs Statistical Accuracy (45 sec)
+## Q: Have you done any backtesting with real trading costs?
 
-**What to say:**
-"Important caveat: we focus on statistical accuracy - RMSE, R-squared, directional accuracy - not economic profitability.
-
-We don't test trading strategies, transaction costs, slippage, position sizing, or risk management.
-
-Reality check: 55% directional accuracy might be profitable, but it depends heavily on trading frequency, spreads, commissions, and market impact. Daily trading incurs high costs.
-
-Full backtesting is needed to assess economic value. Statistical improvements may not survive real trading costs."
-
-**Tone:** Honest and cautious
+Not yet. This focused on statistical accuracy first. We acknowledge in the paper that 55% accuracy might not survive transaction costs, especially daily trading with spreads and commissions. Economic evaluation with costs, slippage, position sizing is crucial future work. Can't claim profitability without that.
 
 ---
 
-## SLIDE 24: Limitations (45 sec)
+## Q: Why use log returns instead of raw returns?
 
-**What to say:**
-"Let me acknowledge our limitations.
-
-Limited universe: Dow 30 only - large-cap US stocks may not generalize to small-cap, international, or other assets.
-
-Daily frequency only: we don't explore intraday or test weekly/monthly frequencies.
-
-Hyperparameter tuning was lightweight on the validation set and may favor simpler models. More extensive tuning could change results.
-
-Single split: main results use one temporal split. Rolling or expanding window validation is recommended for robustness.
-
-And extreme events: we include COVID in validation, but black swan events remain challenging for all models."
-
-**Tone:** This builds credibility - acknowledging limitations shows rigor
+Log returns are better behaved statistically. Approximately normal for short horizons. Time-additive—you can sum them across days. Symmetric for gains and losses. Also standard in academic finance, makes our results comparable.
 
 ---
 
-## SLIDE 25: Key Findings Summary (1 min)
+## Q: Could the TFT do better with more hyperparameter tuning?
 
-**What to say:**
-"Let me summarize our four key findings.
-
-One: Simple models match or beat transformers on this dataset. LSTM wins at h=1 and h=21, Ridge at h=5, TFT is competitive but not superior.
-
-Two: Earnings features add value. 1.1 percentage points overall improvement, but 7.5 percentage points during earnings windows - from 53.9% to 61.4%. This confirms post-earnings-announcement drift.
-
-Three: Performance is regime-dependent. GRU best in bear markets, LSTM best in bull markets. All models struggle in high-volatility downturns.
-
-Four: Complexity is not always better. More parameters don't equal better performance. Data constraints favor simpler models. Feature engineering remains crucial."
-
-**Pace:** Slower - these are take-homes
+Possibly, though we did tune on validation. Deeper issue: TFT has 50,000 parameters where signal-to-noise is extremely low—R-squared around 1%. More tuning might help marginally, but won't overcome the bias-variance trade-off. LSTM with 25,000 parameters better suited. Data problem, not tuning problem.
 
 ---
 
-## SLIDE 26: Contributions to the Field (45 sec)
+## Q: What about using technical indicators with transformers differently?
 
-**What to say:**
-"What makes this work valuable?
-
-Rigorous benchmarking: apples-to-apples comparison across model classes with strict temporal validation and multiple random seeds.
-
-Honest negative results: transformers don't always win. This is important for setting realistic expectations and guiding future research.
-
-Comprehensive evaluation: multi-metric, regime analysis, event windows, ablations.
-
-And we provide a baseline for future work: researchers can compare against our results using similar methodology."
-
-**Emphasis:** "honest negative results" - this is scientifically important
+Interesting idea. We fed indicators the same way to all models for fairness. Transformers might benefit from treating prices and indicators as separate modalities with different encoders, maybe cross-attention. Goes back to richer modalities—transformers may need more customization. Worth exploring.
 
 ---
 
-## SLIDE 27: Future Directions (1 min)
+## Q: How do you explain the Ridge regression success at h=5?
 
-**What to say:**
-"The primary extension is multi-modal integration: news sentiment, earnings call transcripts, social media, macroeconomic text. Our hypothesis is that transformers will excel when processing this heterogeneous data.
-
-Alternative data sources: satellite imagery, credit card data, web scraping, order flow.
-
-Methodological extensions: larger stock universes like the S&P 500, intraday or high-frequency data, longer horizons, cross-asset learning."
-
-**Action:** Keep moving - don't linger on future work
+Ridge finds linear combinations of our engineered features. That it dominates at 5 days suggests weekly signals are captured by linear relationships. The features themselves—momentum, moving averages, volatility—already encode nonlinear transformations. Ridge exploits these without overfitting.
 
 ---
 
-## SLIDE 28: Future Work (Continued) (45 sec)
+## Q: Why did all models fail in the 2022 bear market?
 
-**What to say:**
-"Advanced architectures: patch-wise transformers like PatchTST, foundation models with pretraining, hybrid architectures, graph neural networks for sector relationships.
-
-Interpretability: attention weight analysis, feature importance via SHAP and LIME, regime detection, understanding when and why models fail.
-
-And economic evaluation: full backtesting with transaction costs, portfolio optimization, risk-adjusted returns, real-world deployment."
+2022 had extreme volatility and regime shifts—Fed raised rates aggressively, inflation spiked, correlations broke down. Pattern-based learning struggles when historical patterns become unreliable. Fundamental limitation of ML without macro understanding. Can't predict regimes you've never seen.
 
 ---
 
-## SLIDE 29: Take-Home Messages (1 min)
+## Q: Could you use sentiment from news to improve predictions?
 
-**What to say:**
-"Let me close with take-home messages.
-
-For practitioners: Start simple - LSTM and Ridge can match transformers on daily data. Don't neglect feature engineering. Earnings events provide predictable opportunities. Monitor regime changes carefully. Always validate with strict temporal splits.
-
-For researchers: Transformers need scale - more data and richer modalities. Negative results are valuable - publish them! Multi-modal integration is a promising direction. Benchmark against strong, well-tuned baselines. Economic evaluation is the crucial next step.
-
-Thank you for your attention. I'm happy to take questions."
-
-**Pace:** Slow down for final slide - let each point land
+Absolutely—primary future direction. Transformers will show advantage with heterogeneous data: news sentiment, call transcripts, social media, combined with prices. Attention should excel at fusing modalities. That's where TFT might outperform. Text and prices together—real test.
 
 ---
 
-## SLIDE 30: Thank You / Q&A
+## Q: Why is your R-squared so low—only 1-2%?
 
-**What to say:**
-"Thank you very much. I'll be happy to answer any questions."
-
-**Then:** Wait for questions. Don't rush to fill silence.
+Welcome to stock prediction. This is typical for daily returns. Stock returns are extremely noisy—dominated by unpredictable shocks. Academic literature shows R-squared in this range. Even 1-2% can be economically significant. Key is directional accuracy—getting the sign right—and that's 53-55%. Low R-squared reflects fundamental unpredictability of daily moves.
 
 ---
 
-## Anticipated Questions & Answers
+## Q: What about using longer sequences—maybe attention with 500 days instead of 60?
 
-### Q: Why didn't you test on more stocks?
+We chose 60 days—3 months—based on typical lookback in technical analysis. Longer sequences could help, transformers designed for long-range dependencies. But more parameters to estimate, more computational cost. With our data constraints, worried about overfitting. Worth exploring with sufficient data—where attention might shine.
 
-**A:** "Great question. We used the Dow 30 to have a fixed, well-defined universe without survivorship bias. Testing on larger universes like the S&P 500 is definitely valuable future work, but we wanted to ensure rigorous controls first. The Dow 30 gives us 30 stocks times roughly 2000 trading days, which is about 60,000 stock-day observations."
+---
 
-### Q: Have you done any backtesting with real trading costs?
+## Q: Did you try any ensembles?
 
-**A:** "Not yet - this study focused on statistical accuracy as a necessary first step. We explicitly acknowledge in the paper that 55% directional accuracy might not survive transaction costs, especially for daily trading. Full economic evaluation with realistic costs, slippage, and position sizing is crucial future work."
+Didn't formally test ensembles, but natural next step. Stacking could combine strengths—LSTM for short horizons, Ridge for medium, TFT for specific scenarios. Given different models excel in different regimes, regime-adaptive ensemble could be powerful.
 
-### Q: Why use log returns instead of raw returns?
-
-**A:** "Log returns have several advantages: they're more statistically well-behaved, approximately normally distributed for short horizons, time-additive, and symmetric for gains and losses. They're also standard in academic finance research."
-
-### Q: Could the TFT do better with more hyperparameter tuning?
-
-**A:** "Possibly, though we did tune on the validation set. The deeper issue is that TFT has about 50,000 parameters on a dataset where the signal-to-noise ratio is extremely low. More tuning might help marginally, but it's unlikely to overcome the fundamental bias-variance trade-off. The simpler LSTM with 25,000 parameters seems better suited to this constraint."
-
-### Q: What about using technical indicators with transformers differently?
-
-**A:** "That's an interesting idea. We fed technical indicators the same way to all models for fairness. Transformers might benefit from treating raw prices and indicators as separate modalities with different encoders. This goes back to our point about richer modalities - transformers may need more architectural customization to excel."
-
-### Q: How do you explain the ridge regression success at h=5?
-
-**A:** "Ridge regression is essentially finding linear combinations of our engineered technical features. The fact that it dominates at h=5 suggests that weekly signals are largely captured by these linear relationships. The features themselves - momentum, moving averages, volatility - already encode nonlinear transformations of prices. Ridge exploits these effectively without overfitting."
-
-### Q: Why did all models fail in the 2022 bear market?
-
-**A:** "The 2022 bear market had extremely high volatility and regime shifts - the Fed raised rates aggressively, inflation spiked, and correlations broke down. Pattern-based supervised learning struggles when historical patterns become unreliable. This highlights a fundamental limitation of pure ML approaches without macroeconomic understanding."
-
-### Q: Could you use sentiment from news to improve predictions?
-
-**A:** "Absolutely - that's our primary future direction. We strongly believe that transformers will show their advantage when processing heterogeneous data: news sentiment, earnings call transcripts, social media, combined with prices. The attention mechanism should excel at fusing these different modalities. That's where we expect to see TFT outperform simpler models."
+---
 
 ---
 
@@ -502,7 +342,70 @@ Thank you for your attention. I'm happy to take questions."
 - **Conclusions (Slides 25-29):** 4 minutes
 - **Q&A (Slide 30):** Remaining time
 
-**Total presentation: 18-19 minutes, leaving 1-2 minutes buffer**
+---
+
+# PRESENTATION TIMING GUIDE
+
+**Target: 18-20 minutes total**
+
+- Slide 1 (Title): 30 seconds
+- Slide 2 (Introduction & Approach): 2 minutes
+- Slide 3 (Hypotheses): 1.5 minutes
+- Slide 4 (Literature & Research Gaps): 1.5 minutes
+- Slide 5 (Experimental Design): 1.5 minutes
+- Slide 6 (Data & Features): 1.5 minutes
+- Slide 7 (Models Tested): 1.5 minutes
+- Slide 8 (Main Results - RMSE): 2 minutes
+- Slide 9 (Key Observations): 1.5 minutes
+- Slide 10 (Hypothesis Testing - H1 & H3): 2 minutes
+- Slide 11 (H2 - Earnings Features): 2 minutes
+- Slide 12 (Why Simple Models Win): 2 minutes
+- Slide 13 (Key Takeaways & Future): 2 minutes
+- Slide 14 (Q&A): Transition
+
+**Total: ~21 minutes**
+
+---
+
+# DELIVERY TIPS
+
+## Pacing
+
+- If running behind: Speed up on Slide 4 (Literature) or combine with intro—it's context, not core results. Also speed up on Slides 6 (Data) and 7 (Models)—they're descriptive
+- If running ahead: Elaborate on Slides 10-11 (hypothesis testing) and Slide 12 (why simple models win)—those are your main contributions
+
+## Engagement
+
+- Make eye contact with different parts of the room
+- Use hand gestures for emphasis on key findings
+- Pause after surprising results (Ridge winning at h=5, TFT being worst at h=1)
+- Smile—show enthusiasm for the findings!
+
+## Handling Questions
+
+- Listen fully before responding
+- Repeat the question if the room is large
+- It's okay to say "That's a great question—let me think for a moment"
+- If you don't know: "That's an interesting point I hadn't considered—worth exploring"
+- Bridge back to your core findings when possible
+
+## Technical Issues
+
+- If figures don't display clearly: "As you can see in the paper, Figure X shows..."
+- If laser pointer fails: "In the top left corner..." or "The blue line..."
+- If running low on time: Skip slide details, hit the key number
+
+## Managing Nerves
+
+- Take a deep breath before starting
+- Focus on sharing exciting findings, not performing perfectly
+- Remember: you know this material better than anyone in the room
+- Speak to friendly faces first to build confidence
+- It's a conversation about your work, not a performance
+
+---
+
+**You've got this! Good luck! 🎤📊**
 
 ---
 
